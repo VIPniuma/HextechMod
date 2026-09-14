@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     一键发布到两个更新平台：自有更新服务器 + 雷霆商店。
@@ -36,7 +36,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$root       = Split-Path -Parent $PSScriptRoot
+$root       = $PSScriptRoot
 $pluginCs   = Join-Path $root 'src\HextechMod\Plugin.cs'
 $modCsproj  = Join-Path $root 'src\HextechMod\HextechMod.csproj'
 $publishPs1 = Join-Path $root '_tools\publish.ps1'
@@ -88,10 +88,11 @@ if ($target -ne $current -and -not $DryRun) {
 # --------------------------------------------------------------------------
 Write-Step '发布到更新服务器'
 
-$pubArgs = @('-Notes', $Notes, '-NoBump')
-if ($DryRun) { $pubArgs += '-DryRun' }
-
-& $publishPs1 @pubArgs
+if ($DryRun) {
+    & $publishPs1 -Notes $Notes -NoBump -DryRun
+} else {
+    & $publishPs1 -Notes $Notes -NoBump
+}
 if ($LASTEXITCODE -ne 0) { throw '更新服务器发布失败，已中止（未打 tag）。' }
 
 Write-Ok '更新服务器已发布'
