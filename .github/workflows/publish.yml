@@ -35,12 +35,19 @@ jobs:
       - name: Build Release and pack Thunderstore package
         run: dotnet build src/HextechMod/HextechMod.csproj -c Release -p:DeployModFiles=false
 
+      - name: Check Thunderstore token
+        run: |
+          if [ -z "${{ secrets.TCLI_AUTH_TOKEN }}" ]; then
+            echo "::error::TCLI_AUTH_TOKEN secret is not set. Go to Settings > Secrets and variables > Actions and add it."
+            exit 1
+          fi
+
       - name: Install tcli
-        run: dotnet tool install -g tcli --prerelease
+        run: dotnet tool install tcli --tool-path ./tools --prerelease
 
       - name: Publish to Thunderstore
         env:
           TCLI_AUTH_TOKEN: ${{ secrets.TCLI_AUTH_TOKEN }}
         run: |
           ZIP="artifacts/thunderstore/release/PeakModder-HextechMod-${{ steps.ver.outputs.version }}.zip"
-          tcli publish --file "$ZIP"
+          ./tools/tcli publish --file "$ZIP"

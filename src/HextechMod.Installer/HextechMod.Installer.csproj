@@ -52,6 +52,8 @@
     <PackageReference Include="MahApps.Metro" Version="1.6.5" />
     <!-- MahApps 1.6.5 的运行时依赖（ThemeManager / 颜色资源）。 -->
     <PackageReference Include="ControlzEx" Version="3.0.2.4" PrivateAssets="all" />
+    <!-- 将 MahApps.Metro、ControlzEx 等依赖全部打包进单个 exe，避免玩家只拷走一个 exe 时崩溃。 -->
+    <PackageReference Include="Costura.Fody" Version="5.7.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
