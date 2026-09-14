@@ -523,10 +523,22 @@ internal static class DefaultHextechs
         Register(new ActionHextech(
             "breathe",
             "吐纳",
-            "每秒自动恢复 1% 体力（每层再叠 1%，最多 2 层）。",
+            "每秒恢复 1% 体力（每层再叠 1%，最多 2 层）；攀爬时不恢复。",
             quality,
             onTick: (state, stacks, dt) =>
             {
+                // 攀爬中不回体力（2026-09-15 用户要求）：不然挂在墙上也能一直回体力，
+                // 等于把「攀爬耐力」这条最硬的资源白送，攀爬类词条（耐力储备 / 极限攀爬）也失去意义。
+                // 判定沿用「蜘蛛侠」那套（HextechPatches.SpiderManPatch）：
+                // 墙上 / 绳梯 / 藤蔓（isClimbingAnything），或抓着边缘 / 钉子的把手（currentClimbHandle）。
+                // 放在计时之前 return：攀爬期间连计时都不走，松手后要重新攒满 1 秒才回，不会「存着一次性补」。
+                var data = state.Character.data;
+
+                if (data != null && (data.isClimbingAnything || data.currentClimbHandle != null))
+                {
+                    return;
+                }
+
                 var timer = state.GetTimer(BreatheTimerKey) + dt;
 
                 if (timer < BreatheInterval)
