@@ -1,0 +1,46 @@
+name: Publish to Thunderstore
+
+# 触发方式：打版本 tag 并推送，例如：
+#   git tag v0.3.33
+#   git push --tags
+# 每次发版只需打一个新 tag，CI 会自动 版本号+打包+上传 一步完成。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Extract version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set version in csproj
+        run: |
+          sed -i "s|<Version>.*</Version>|<Version>${{ steps.ver.outputs.version }}</Version>|" src/HextechMod/HextechMod.csproj
+
+      - name: Pack Thunderstore package
+        run: dotnet pack src/HextechMod/HextechMod.csproj -c Release
+
+      - name: Install tcli
+        run: dotnet tool install -g tcli --prerelease
+
+      - name: Publish to Thunderstore
+        env:
+          TCLI_AUTH_TOKEN: ${{ secrets.TCLI_AUTH_TOKEN }}
+        run: |
+          ZIP="artifacts/thunderstore/release/PeakModder-HextechMod-${{ steps.ver.outputs.version }}.zip"
+          dotnet tcli publish --file "$ZIP" --config-path thunderstore.toml

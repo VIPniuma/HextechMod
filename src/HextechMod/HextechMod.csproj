@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Project properties -->
+  <PropertyGroup>
+    <!-- This is the most appropriate target framework for the game's Unity version. -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <!-- This is the global identifier for your mod. This should not be changed after release. -->
+    <AssemblyName>PeakModder.HextechMod</AssemblyName>
+    <!-- This is the display name of your mod. -->
+    <AssemblyTitle>HextechMod</AssemblyTitle>
+    <!-- The version number for your assembly, BepInEx plugin, and Thunderstore package. -->
+    <Version>0.3.32</Version>
+    <RootNamespace>PeakModder.HextechMod</RootNamespace>
+  </PropertyGroup>
+
+  <!-- ThunderPipe properties -->
+  <PropertyGroup>
+    <IsThunderstorePackable>true</IsThunderstorePackable>
+    <ThunderstoreName>HextechMod</ThunderstoreName>
+    <ThunderstoreDescription>海克斯强化模组</ThunderstoreDescription>
+    <ThunderstoreCommunities>peak</ThunderstoreCommunities>
+    <ThunderstoreCategories>mods</ThunderstoreCategories>
+  </PropertyGroup>
+
+  <!--
+    Define mod files to copy to the relative BepInEx directory after build
+    and where they are packed to when building a Thunderstore package
+  -->
+  <ItemGroup>
+    <ModFile Include="$(TargetPath)" Destination="plugins/" />
+  </ItemGroup>
+
+  <!-- 技能图标：game-icons.net（CC BY 3.0），打包时嵌入 dll，保持单文件分发。 -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Icons\*.png" />
+  </ItemGroup>
+
+  <!-- Thunderstore package metadata -->
+  <ItemGroup>
+    <ThunderstorePackageFile Include="$(SolutionRoot)README.md" />
+    <ThunderstorePackageFile Include="$(SolutionRoot)CHANGELOG.md" />
+    <!-- 雷霆商店要求包根目录必须有 icon.png（商品页封面用，游戏里不读）。 -->
+    <ThunderstorePackageFile Include="$(SolutionRoot)icon.png" />
+    <ThunderstorePackageFile Include="$(SolutionRoot)LICENSE" />
+
+    <ThunderstoreDependency Include="BepInEx-BepInExPack_PEAK" Version="5.4.75301" />
+  </ItemGroup>
+</Project>

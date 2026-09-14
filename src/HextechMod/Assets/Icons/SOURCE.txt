@@ -1,0 +1,11 @@
+技能图标来自开源图标库 game-icons.net，通过 Iconify API（https://api.iconify.design）获取。
+原图标以 CC BY 3.0 授权发布，作者/贡献者包括 Delapouite、Lorc 等（详见 game-icons.net 各图标页面）。
+
+游戏内文件名对应关系：
+- super-jump.png  -> game-icons:jump-across
+- sprint.png      -> game-icons:sprint
+- cleanse.png     -> game-icons:sparkles
+- heal.png        -> game-icons:healing
+- adrenaline.png  -> game-icons:muscle-up
+- invincible.png  -> game-icons:shield
+- refresh.png     -> 自行绘制（256x256 白色顺时针弯箭头，与现有技能图标同一风格）

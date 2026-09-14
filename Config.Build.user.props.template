@@ -1,0 +1,47 @@
+<!--
+  INSTRUCTIONS: Copy this template file and name it 'Config.Build.user.props'!
+                Otherwise the values aren't read.
+-->
+<Project>
+  <!-- User properties -->
+  <PropertyGroup>
+    <!-- Set if the default steam game install directory doesn't work. -->
+    <!-- <PEAKGameRootDir>C:\Program Files (x86)\Steam\steamapps\common\PEAK\</PEAKGameRootDir> -->
+
+    <!-- Set if your BepInEx/ directory isn't in the game files. -->
+    <!-- <PEAKBepInExDir></PEAKBepInExDir> -->
+
+    <!-- Enable/disable deploying mod files to BepInEx directory. -->
+    <DeployModFiles>true</DeployModFiles>
+
+    <!--
+      Update feed: the full URL of version.json, e.g. https://your-domain.example/version.json
+
+      The real address belongs here and nowhere else. This file is gitignored, so the host
+      never lands in the repository -- do not hardcode it in source, README or this template.
+      Directory.Build.props injects the value into the mod and the installer as assembly
+      metadata at build time. Left empty, the built package simply skips version checks.
+    -->
+    <!-- <HextechUpdateFeedUrl>https://your-domain.example/version.json</HextechUpdateFeedUrl> -->
+
+    <!--
+      ---- Publishing (used by _tools/publish.ps1) ----
+
+      The publish script uploads PeakModder.HextechMod.dll and version.json over SSH/SCP.
+      Credentials live here and nowhere else. Host/User/Port fall back to the host part of
+      HextechUpdateFeedUrl, current account name and 22; the key defaults to
+      ~/.ssh/hextech_publish. Set up passwordless login first:
+
+        ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\hextech_publish -N ""
+        type $env:USERPROFILE\.ssh\hextech_publish.pub | ssh root@host "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+
+      Leave HextechPublishRemoteDir empty and the script will locate version.json on the
+      server by itself -- write the result back here afterwards so it stops guessing.
+    -->
+    <!-- <HextechPublishHost>your-domain.example</HextechPublishHost> -->
+    <!-- <HextechPublishUser>root</HextechPublishUser> -->
+    <!-- <HextechPublishPort>22</HextechPublishPort> -->
+    <!-- <HextechPublishKey>C:\Users\you\.ssh\hextech_publish</HextechPublishKey> -->
+    <!-- <HextechPublishRemoteDir>/www/wwwroot/your-site</HextechPublishRemoteDir> -->
+  </PropertyGroup>
+</Project>

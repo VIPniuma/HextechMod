@@ -1,0 +1,8 @@
+bin/
+obj/
+artifacts/
+*.user
+*.userprefs
+config/
+BepInEx/
+Config.Build.user.props
