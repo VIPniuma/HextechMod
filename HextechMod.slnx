@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HextechMod/HextechMod.csproj" />
+    <Project Path="src/HextechMod.Installer/HextechMod.Installer.csproj" />
+  </Folder>
+</Solution>

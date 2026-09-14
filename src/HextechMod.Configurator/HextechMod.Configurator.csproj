@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>HextechModConfigurator</AssemblyName>
+    <RootNamespace>PeakModder.HextechConfigurator</RootNamespace>
+    <!-- 只给作者本机用的平衡配置器：改数值 → 上传到服务器 balance.json，玩家端模组启动时自动拉取。
+         不随模组分发，服务器地址 / 密钥路径写死在这里没有泄露风险。 -->
+    <Version>1.0.0</Version>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="MahApps.Metro" Version="1.6.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\HextechMod.Installer\app.ico" Link="app.ico" />
+  </ItemGroup>
+
+</Project>

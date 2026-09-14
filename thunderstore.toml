@@ -1,0 +1,24 @@
+[config]
+schemaVersion = "0.0.1"
+
+[package]
+# 这里的 namespace/name 只是给 tcli 识别用；用 --file 发布时，
+# 实际版本号来自 dotnet pack 打出来的包（manifest.json）。
+namespace = "PeakModder"
+name = "HextechMod"
+versionNumber = "0.0.0"
+description = "海克斯强化模组"
+websiteUrl = "https://github.com/<你的用户名>/海克斯mod"
+containsNsfwContent = false
+
+[build]
+icon = "./icon.png"
+readme = "./README.md"
+outdir = "./build"
+
+[publish]
+repository = "https://thunderstore.io"
+communities = ["peak"]
+
+[publish.categories]
+peak = ["mods"]
