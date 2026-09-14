@@ -68,9 +68,8 @@ public sealed class HextechManager : MonoBehaviour
     private int _runElapsedAsks;
     private bool _runElapsedAnswered;
 
-    /// <summary>面板键这次按下的时刻（&lt; 0 表示没在按），以及这次按住有没有已经触发过长按。</summary>
-    private float _hudKeyDownAt = -1f;
-    private bool _hudLongPressFired;
+    // K 键切换海克斯页面的同帧去重标记（见 HandleHudInput）。
+    private bool _codexToggleGuard;
 
     /// <summary>这次进机场有没有已经清过一局。用来兜住「插件是在机场场景之后才装起来的」那种启动。</summary>
     private bool _airportResetDone;
@@ -304,10 +303,6 @@ public sealed class HextechManager : MonoBehaviour
             HandleSkillInput(state);
             HandleChoiceInput(state);
         }
-        else
-        {
-            CancelHudKey();
-        }
     }
 
     private static bool IsAnyUiOpen()
@@ -380,9 +375,6 @@ public sealed class HextechManager : MonoBehaviour
         if (_modEnabled)
         {
             _modEnabled = false;
-            _hudKeyDownAt = -1f;
-            _hudLongPressFired = false;
-
             // 「机械手」加长的是交互距离（不属于角色数值基准）：关掉模组时得把手缩回去，
             // 不然玩家以后一直是长手。
             HextechAdvancedPatches.MechanicalHand.Restore();
@@ -871,10 +863,11 @@ public sealed class HextechManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 面板键：短按展开 / 收起右侧 HUD，长按把所有 UI 整个藏起来（再长按原样恢复）。
+    /// 面板键（K）：打开 / 关闭「海克斯页面」本局持有总览（见 <see cref="HextechCodex"/>）。
     /// <para>
-    /// 收起只藏掉大面板，角落那颗小提示还在；长按是连它和顶部提示条一起不画。
-    /// 用「松开时才判定短按」的写法，这样按住的过程中不会先收起、再被长按盖掉。
+    /// 关闭由页面自己处理（按 K / ESC 都会关），这里只负责「没开的时候把它打开」——
+    /// 页面开着时 <see cref="IsAnyUiOpen"/> 已经为 true，这一段不会被调到，
+    /// 所以不会出现「按一下开了、同一帧又被自己关掉」。
     /// </para>
     /// </summary>
     private void HandleHudInput()
@@ -888,46 +881,22 @@ public sealed class HextechManager : MonoBehaviour
 
         if (Input.GetKeyDown(key))
         {
-            _hudKeyDownAt = Time.unscaledTime;
-            _hudLongPressFired = false;
-            return;
-        }
-
-        if (!Input.GetKey(key))
-        {
-            // 松手：这一下要是没触发过长按，就按短按处理。
-            if (_hudKeyDownAt >= 0f && !_hudLongPressFired)
+            // 按下那一帧切一次；按住期间（GetKeyDown 只触发一帧）靠这个标记挡住重复切换，
+            // 松开后才解禁，这样「开的一帧不会被同一个按键又关掉 / 反之」。
+            if (!_codexToggleGuard)
             {
-                HextechHud.ToggleCollapsed();
+                _codexToggleGuard = true;
+                HextechCodex.Instance?.Toggle();
             }
-
-            _hudKeyDownAt = -1f;
-            return;
         }
-
-        if (_hudLongPressFired || _hudKeyDownAt < 0f)
+        else if (!Input.GetKey(key))
         {
-            return;
+            _codexToggleGuard = false;
         }
-
-        if (Time.unscaledTime - _hudKeyDownAt < HudLongPressSeconds)
-        {
-            return;
-        }
-
-        _hudLongPressFired = true;
-        HextechHud.ToggleHidden();
     }
 
     /// <summary>
     /// 界面打开期间不处理面板键，把长按计时清掉 ——
-    /// 否则玩家按住键的过程中弹出面板、松手时才处理，会补发一次莫名其妙的收起 / 展开。
-    /// </summary>
-    private void CancelHudKey()
-    {
-        _hudKeyDownAt = -1f;
-    }
-
     private void HandleSkillInput(HextechState state)
     {
         if (ModConfig.SkillKey.Value != KeyCode.None && Input.GetKeyDown(ModConfig.SkillKey.Value))

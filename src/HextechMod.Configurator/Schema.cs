@@ -55,10 +55,10 @@ internal static class Schema
                 F("SkillRegistry.SprintDurationSeconds", "无限耐力(秒)", 1, 30, 1, 5),
                 F("SkillRegistry.SprintHungerCost", "饥饿代价(点)", 0, 50, 1, 10)),
 
-            M("净化", "技能解锁词条",
+            M("净化", "技能解锁词条 · 寒冷固定额外清 50%",
                 F("SkillRegistry.CleanseEnergy", "能量", 5, 100, 5, 60),
                 F("SkillRegistry.CleanseCooldown", "冷却(秒)", 3, 300, 1, 60),
-                F("SkillRegistry.CleansePercentPerStatus", "每个负面清除比例", 0, 0.5, 0.01, 0.05)),
+                F("SkillRegistry.CleansePercentPerStatus", "普通负面清除比例(0.1=10%)", 0, 0.5, 0.01, 0.1)),
 
             M("治疗波", "技能解锁词条",
                 F("SkillRegistry.HealEnergy", "能量", 5, 100, 5, 45),
@@ -85,8 +85,8 @@ internal static class Schema
                 F("HextechAdvancedPatches.MechanicalHand.ExtraDistance", "伸长距离(米)", 1, 20, 1, 5),
                 F("HextechAdvancedPatches.MechanicalHand.PetrifyCostPoints", "石化代价(点)", 0, 50, 1, 5)),
 
-            M("羽落", "摔伤系数（越小越强）",
-                F("DefaultHextechs.FeatherFallFactorPerStack", "摔落伤害系数", 0.05, 1, 0.05, 0.5)),
+            M("羽落", "摔落伤害减免 · 数值越小落地越轻（0.4 = 落地伤害减 60%；最多叠 4 层）",
+                F("DefaultHextechs.FeatherFallFactorPerStack", "每层摔落伤害 ×倍", 0.05, 1, 0.05, 0.4)),
 
             M("投掷专家", "投掷力度",
                 F("DefaultHextechs.ThrowMasterFactorPerStack", "力度倍数", 1, 2, 0.05, 1.2)),

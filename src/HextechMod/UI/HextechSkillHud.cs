@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -7,6 +8,9 @@ namespace PeakModder.HextechMod;
 
 /// <summary>
 /// 屏幕正下方的技能 HUD：已解锁技能排成一排，显示 CD、能量消耗与当前选中技能。
+/// <para>
+/// 右侧挂一个「能量 / 代币」小条，并提示按 L 打开商店（原先在右侧大面板里的钱包条挪到了这里）。
+/// </para>
 /// </summary>
 public sealed class HextechSkillHud : MonoBehaviour
 {
@@ -20,6 +24,10 @@ public sealed class HextechSkillHud : MonoBehaviour
     private const float CostHeight = 22f;
     private const float BottomOffset = 26f;
 
+    private const float WalletWidth = 300f;
+    private const float WalletHeight = 76f;
+    private const float WalletGap = 18f;
+
     private static readonly Color DimIcon = new(1f, 1f, 1f, 0.35f);
     private static readonly Color NormalIcon = new(1f, 1f, 1f, 1f);
     private static readonly Color VeilColor = new(0.04f, 0.03f, 0.02f, 0.75f);
@@ -27,11 +35,16 @@ public sealed class HextechSkillHud : MonoBehaviour
     private Canvas _canvas = null!;
     private RectTransform _bar = null!;
     private TextMeshProUGUI _titleLabel = null!;
+    private Image _wallet = null!;
+    private TextMeshProUGUI _walletTop = null!;
+    private TextMeshProUGUI _walletShop = null!;
+
     private readonly List<Slot> _slots = new();
 
     private int _shownSkillCount = -1;
     private float _lastCooldown = -1f;
     private SkillId? _lastCastSkill;
+    private string _shownWallet = string.Empty;
 
     public static HextechSkillHud Create(Transform parent)
     {
@@ -68,26 +81,36 @@ public sealed class HextechSkillHud : MonoBehaviour
         _titleLabel.rectTransform.pivot = new Vector2(0.5f, 0f);
         _titleLabel.rectTransform.anchoredPosition = new Vector2(0f, BottomOffset);
         _titleLabel.rectTransform.sizeDelta = new Vector2(800f, 26f);
+
+        // 右侧的钱包条：能量 + 代币 + 按 L 开商店。原先在右侧大面板里，现在挪到技能 HUD 旁边。
+        _wallet = UiFactory.Rounded(root, UiFactory.PanelHighlight, 16);
+        _wallet.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        _wallet.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+        _wallet.rectTransform.pivot = new Vector2(0.5f, 0f);
+        _wallet.rectTransform.sizeDelta = new Vector2(WalletWidth, WalletHeight);
+
+        _walletTop = UiFactory.Label(_wallet.transform, string.Empty, 22f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
+        _walletTop.textWrappingMode = TextWrappingModes.NoWrap;
+        _walletTop.rectTransform.anchorMin = new Vector2(0f, 1f);
+        _walletTop.rectTransform.anchorMax = new Vector2(1f, 1f);
+        _walletTop.rectTransform.pivot = new Vector2(0.5f, 1f);
+        _walletTop.rectTransform.offsetMin = new Vector2(10f, -WalletHeight + 6f);
+        _walletTop.rectTransform.offsetMax = new Vector2(-10f, -8f);
+
+        _walletShop = UiFactory.Label(_wallet.transform, string.Empty, 18f, TextAlignmentOptions.Center, UiFactory.TextMuted);
+        _walletShop.textWrappingMode = TextWrappingModes.NoWrap;
+        _walletShop.rectTransform.anchorMin = new Vector2(0f, 0f);
+        _walletShop.rectTransform.anchorMax = new Vector2(1f, 0f);
+        _walletShop.rectTransform.pivot = new Vector2(0.5f, 0f);
+        _walletShop.rectTransform.offsetMin = new Vector2(10f, 6f);
+        _walletShop.rectTransform.offsetMax = new Vector2(-10f, WalletHeight - 30f);
     }
 
     private void Update()
     {
         var state = HextechState.Get(Character.localCharacter);
 
-        // 模组被关掉时技能条也要跟着消失（和右侧 HUD 一样，每帧兜底）。
-        if (state == null || HextechHud.IsHidden || !ModConfig.Enabled.Value)
-        {
-            if (_canvas.enabled)
-            {
-                _canvas.enabled = false;
-            }
-
-            return;
-        }
-
-        var skills = state.Skills;
-        var count = skills.Count;
-        if (count == 0)
+        if (state == null || !ModConfig.Enabled.Value)
         {
             if (_canvas.enabled)
             {
@@ -102,54 +125,98 @@ public sealed class HextechSkillHud : MonoBehaviour
             _canvas.enabled = true;
         }
 
-        var current = state.CurrentSkill;
-        var cooldown = state.CooldownRemaining;
+        var skills = state.Skills;
+        var count = skills.Count;
 
-        if (cooldown > 0.05f && _lastCooldown <= 0.05f && current.HasValue)
+        _bar.gameObject.SetActive(count > 0);
+        _titleLabel.gameObject.SetActive(count > 0);
+
+        var barWidth = 0f;
+        var barHeight = 0f;
+
+        if (count > 0)
         {
-            _lastCastSkill = current.Value;
-        }
+            var current = state.CurrentSkill;
+            var cooldown = state.CooldownRemaining;
 
-        _lastCooldown = cooldown;
+            if (cooldown > 0.05f && _lastCooldown <= 0.05f && current.HasValue)
+            {
+                _lastCastSkill = current.Value;
+            }
 
-        if (_shownSkillCount != count)
-        {
-            _shownSkillCount = count;
-            RebuildSlots(skills);
-        }
+            _lastCooldown = cooldown;
 
-        var castId = cooldown > 0.05f ? _lastCastSkill : null;
-        var barWidth = count * SlotSize + Mathf.Max(0, count - 1) * SlotSpacing + BarPadding * 2f;
-        var barHeight = SlotSize + CostHeight + BarPadding * 2f;
-        _bar.sizeDelta = new Vector2(barWidth, barHeight);
+            if (_shownSkillCount != count)
+            {
+                _shownSkillCount = count;
+                RebuildSlots(skills);
+            }
 
-        var titleY = BottomOffset + barHeight + 4f;
-        _titleLabel.rectTransform.anchoredPosition = new Vector2(0f, titleY);
+            barWidth = count * SlotSize + Mathf.Max(0, count - 1) * SlotSpacing + BarPadding * 2f;
+            barHeight = SlotSize + CostHeight + BarPadding * 2f;
+            _bar.sizeDelta = new Vector2(barWidth, barHeight);
 
-        if (current.HasValue)
-        {
-            var definition = SkillRegistry.Get(current.Value);
-            _titleLabel.text =
-                $"{definition.Title} · 按 {ModConfig.SkillKey.Value} 释放 · 按 {ModConfig.CycleSkillKey.Value} 切换";
-            _titleLabel.color = UiFactory.TextPrimary;
+            var titleY = BottomOffset + barHeight + 4f;
+            _titleLabel.rectTransform.anchoredPosition = new Vector2(0f, titleY);
+
+            if (current.HasValue)
+            {
+                var definition = SkillRegistry.Get(current.Value);
+                _titleLabel.text =
+                    $"{definition.Title} · 按 {ModConfig.SkillKey.Value} 释放 · 按 {ModConfig.CycleSkillKey.Value} 切换";
+                _titleLabel.color = UiFactory.TextPrimary;
+            }
+            else
+            {
+                _titleLabel.text = "尚未选择技能";
+                _titleLabel.color = UiFactory.TextMuted;
+            }
+
+            for (var i = 0; i < _slots.Count; i++)
+            {
+                var slot = _slots[i];
+                var id = skills[i];
+                var definition = SkillRegistry.Get(id);
+                var isCurrent = current.HasValue && current.Value == id;
+                var isCasting = cooldown > 0.05f && _lastCastSkill.HasValue && _lastCastSkill.Value == id;
+                var canAfford = state.Energy >= definition.EnergyCost;
+
+                UpdateSlot(slot, definition, isCurrent, isCasting, cooldown, canAfford);
+            }
         }
         else
         {
-            _titleLabel.text = "尚未选择技能";
-            _titleLabel.color = UiFactory.TextMuted;
+            _shownSkillCount = 0;
+            _lastCooldown = -1f;
         }
 
-        for (var i = 0; i < _slots.Count; i++)
+        // 钱包条：有技能时贴着技能条右侧，没有技能时居中。
+        var walletX = count > 0
+            ? (barWidth / 2f) + WalletGap + (WalletWidth / 2f)
+            : 0f;
+
+        _wallet.rectTransform.anchoredPosition = new Vector2(walletX, BottomOffset);
+
+        RefreshWallet(state);
+    }
+
+    private void RefreshWallet(HextechState state)
+    {
+        var accentHex = ColorUtility.ToHtmlStringRGB(UiFactory.Accent);
+        var warnHex = ColorUtility.ToHtmlStringRGB(UiFactory.Warning);
+        var signature = $"{state.Energy:0}|{state.TokensTenths}|{ModConfig.ShopKey.Value}";
+
+        if (_shownWallet == signature)
         {
-            var slot = _slots[i];
-            var id = skills[i];
-            var definition = SkillRegistry.Get(id);
-            var isCurrent = current.HasValue && current.Value == id;
-            var isCasting = castId.HasValue && castId.Value == id;
-            var canAfford = state.Energy >= definition.EnergyCost;
-
-            UpdateSlot(slot, definition, isCurrent, isCasting, cooldown, canAfford);
+            return;
         }
+
+        _shownWallet = signature;
+
+        _walletTop.text =
+            $"<color=#{accentHex}>⚡ {state.Energy:0}/{HextechState.MaxEnergy}</color>"
+            + $"    <color=#{warnHex}>◈ {HextechState.FormatTokens(state.Tokens)} 代币</color>";
+        _walletShop.text = $"按 {ModConfig.ShopKey.Value} 打开商店";
     }
 
     private void RebuildSlots(IReadOnlyList<SkillId> skills)

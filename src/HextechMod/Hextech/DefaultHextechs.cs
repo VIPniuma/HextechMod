@@ -49,12 +49,12 @@ internal static class DefaultHextechs
     public const string RefinedStomachId = "refined_stomach";
 
     /// <summary>
-    /// 羽落：每层把「摔落造成的伤势」乘以该系数（0.5 = 摔伤减半，「免疫部分摔落伤害」）。
+    /// 羽落：每层把「摔落造成的伤势」乘以该系数（0.4 = 摔伤减 60%，「免疫部分摔落伤害」）。
     /// 判定写在 <see cref="HextechPatches"/> 的 AddStatus 前缀里，每次摔落都生效 ——
     /// 原版 <c>CharacterMovement.CapFallDamage</c> 是「一次性窗口」（爆炸击飞专用），拿来当持续减免只会护住第一次。
-    /// 2026-09-14 用户拍板：从 0.02（-98%，几乎完全免疫）削到 0.5（-50%）。
+    /// 2026-09-14 用户拍板：从 0.02（-98%，几乎完全免疫）削到 0.4（-60%）。
     /// </summary>
-    public static float FeatherFallFactorPerStack = 0.5f;
+    public static float FeatherFallFactorPerStack = 0.4f;
 
     /// <summary>长跑运动员：每层把冲刺耐力消耗乘以该系数。</summary>
     public static float MarathonerSprintFactorPerStack = 0.8f;
@@ -471,7 +471,7 @@ internal static class DefaultHextechs
             "每 2 秒自动驱散一点困倦。",
             quality,
             onTick: (state, stacks, dt) => TickStatus(
-                state, "clear_mind", "clear_mind", dt, 2f, CharacterAfflictions.STATUSTYPE.Drowsy, 0.02f * stacks),
+                state, "clear_mind", "clear_mind", dt, 2f, CharacterAfflictions.STATUSTYPE.Drowsy, StatusPoint * stacks),
             stackable: true,
             maxStacks: 2));
 
@@ -542,11 +542,11 @@ internal static class DefaultHextechs
             stackable: true,
             maxStacks: 2));
 
-        // 技能本身是「朝视线方向把自己弹射出去」，跟跳跃无关（原名叫「海克斯：跳跃」）。
+        // 技能本质是「进入低重力漂浮、朝视线方向轻盈飘起」，不是击飞/弹射（原名叫「海克斯：跳跃」）。
         // 技能词条的说明统一带上「技能介绍 + 效果 + 能量 / 冷却」（2026-09-14 用户要求），
         // 全部插值引用 SkillRegistry 的静态字段 —— 服务器平衡配置改了数值，这里自动跟上。
         RegisterSkillUnlock("unlock_super_jump", "海克斯：漂浮",
-            $"解锁主动技能「海克斯漂浮」：朝视线方向把自己弹射出去，并短暂进入低重力漂浮；"
+            $"解锁主动技能「海克斯漂浮」：短暂进入低重力漂浮状态，朝视线方向轻盈飘起；"
             + $"代价是使用后立刻 +{SkillRegistry.SuperJumpHungerCost:0} 点饥饿值"
             + $"（{SkillRegistry.SuperJumpEnergy:0} 能量 · {SkillRegistry.SuperJumpCooldown:0} 秒冷却）。",
             quality, SkillId.SuperJump);
@@ -555,7 +555,7 @@ internal static class DefaultHextechs
             + $"用完立刻涨一截饥饿（{SkillRegistry.SprintEnergy:0} 能量 · {SkillRegistry.SprintCooldown:0} 秒冷却）。",
             quality, SkillId.Sprint);
         RegisterSkillUnlock("unlock_cleanse", "海克斯：净化",
-            $"解锁主动技能「净化」：清除自身每个负面状态当前值的 {SkillRegistry.CleansePercentPerStatus * 100f:0.#}%；"
+            $"解锁主动技能「净化」：清除自身每个负面状态当前值的 {SkillRegistry.CleansePercentPerStatus * 100f:0.#}%（寒冷额外清除 {SkillRegistry.CleanseColdPercent * 100f:0.#}%）；"
             + $"实际消除多少就转成多少饥饿值（{SkillRegistry.CleanseEnergy:0} 能量 · {SkillRegistry.CleanseCooldown:0} 秒冷却）。",
             quality, SkillId.Cleanse);
         RegisterSkillUnlock("unlock_heal", "海克斯：治疗波",
@@ -582,12 +582,14 @@ internal static class DefaultHextechs
         // 从白银升上来：摔落伤害几乎免疫直接抹掉了这游戏最大的一条死因。
         // 没有 onAcquired：减免由 HextechPatches.AddStatus 前缀在每次摔落时乘
         // FeatherFallFactorPerStack 完成（原版的 CapFallDamage 是一次性窗口，撑不住一整局）。
-        // 2026-09-14 用户拍板：从 -98%（几乎完全免疫）削到 -50%（落地伤害减半）。
+        // 2026-09-14 用户拍板：从 -98%（几乎完全免疫）削到 -60%（落地伤害只剩 40%）。
         Register(new ActionHextech(
             FeatherFallId,
             "羽落",
-            "摔落造成的伤势 -50%（落地伤害减半）。",
+            "摔落造成的伤势 -60%（落地伤害只剩 40%）。",
             quality,
+            stackable: false,
+            maxStacks: 1,
             drawback: Cost(
                 "落地太轻，蹬地也使不上劲：地面移动速度 -8%。",
                 state => state.Character.refs.movement.movementForce *= 0.92f)));

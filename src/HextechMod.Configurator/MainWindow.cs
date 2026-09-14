@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
@@ -521,15 +522,70 @@ internal sealed partial class MainWindow
                     CreateNoWindow = true,
                 };
 
-                using var process = Process.Start(start);
-                var output = process!.StandardError.ReadToEnd();
-                process.WaitForExit(20000);
+                var stdOut = new StringBuilder();
+                var stdErr = new StringBuilder();
+
+                using var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+
+                // 两条流都异步读，避免 scp 把某一侧缓冲区写满后互相卡死（那种死锁会一直拖到超时）。
+                process.OutputDataReceived += (_, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        stdOut.AppendLine(e.Data);
+                    }
+                };
+                process.ErrorDataReceived += (_, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        stdErr.AppendLine(e.Data);
+                    }
+                };
+
+                if (!process.Start())
+                {
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        _busy = false;
+                        SetStatus("上传失败：没能启动 scp（确认本机装了 Git/OpenSSH 且在 PATH 里）。", Theme.Danger);
+                    });
+                    return;
+                }
+
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                // 等进程退出；超时（多半是网络/密钥问题）就杀掉并当失败，绝不直接读 ExitCode ——
+                // 进程没退出时读 ExitCode 会抛 InvalidOperationException，而且发生在 UI 线程上 → 整个程序闪退。
+                if (!process.WaitForExit(25000))
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                        // 杀不掉也无所谓，下面照常当超时处理。
+                    }
+
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        _busy = false;
+                        SetStatus("上传超时（25 秒没响应，多半是网络或密钥问题）。本地备份已存：" + LocalBackupPath,
+                            Theme.Danger);
+                    });
+                    return;
+                }
+
+                var output = stdErr.ToString();
+                var exitCode = process.ExitCode;
 
                 Dispatcher.BeginInvoke(() =>
                 {
                     _busy = false;
 
-                    if (process.ExitCode == 0)
+                    if (exitCode == 0)
                     {
                         _version++;
                         SetStatus("已上传 v" + _version + "（" + overrides.Count + " 项改动）· 玩家重启游戏后生效。",

@@ -106,8 +106,11 @@ public static class SkillRegistry
 
     public static float SuperJumpHungerCost = 10f;
 
-    /// <summary>净化：每个负面状态清除当前值的比例（2026-09-14 用户定的：5%）。</summary>
-    public static float CleansePercentPerStatus = 0.05f;
+    /// <summary>净化：寒冷（受冻）单独多清的比例，比普通负面高。</summary>
+    public static float CleanseColdPercent = 0.5f;
+
+    /// <summary>净化：普通负面状态清除当前值的比例（用户定的：10%）；寒冷用 CleanseColdPercent（50%）。</summary>
+    public static float CleansePercentPerStatus = 0.1f;
 
     public static float HealInjuryPoints = 15f;
 
@@ -147,7 +150,7 @@ public static class SkillRegistry
         Register(new SkillDefinition(
             SkillId.SuperJump,
             "海克斯漂浮",
-            $"朝视线方向弹射出去，并短暂进入低重力漂浮状态；代价是使用后立刻增加 {SuperJumpHungerCost:0} 点饥饿值。",
+            $"短暂进入低重力漂浮状态，朝视线方向轻盈飘起；代价是使用后立刻增加 {SuperJumpHungerCost:0} 点饥饿值。",
             SuperJumpEnergy,
             SuperJumpCooldown,
             character =>
@@ -186,12 +189,12 @@ public static class SkillRegistry
                     false);
             }));
 
-        // 净化（2026-09-14 用户重做）：不再全清 —— 每个负面状态各清掉当前值的 5%，
+        // 净化（2026-09-14 用户重做）：不再全清 —— 普通负面状态各清掉当前值的 10%，寒冷额外清 50%，
         // 实际消除多少（换算成「点」）就原样转成饥饿值加上 —— 清得越多越饿，解药是要拿饭换的。
         Register(new SkillDefinition(
             SkillId.Cleanse,
             "净化",
-            $"清除自身每个负面状态当前值的 {CleansePercentPerStatus * 100f:0.#}%；"
+            $"清除自身每个负面状态当前值的 {CleansePercentPerStatus * 100f:0.#}%（寒冷额外清除 {CleanseColdPercent * 100f:0.#}%）；"
             + "实际消除多少，就立刻转成多少饥饿值（清得越多越饿）。",
             CleanseEnergy,
             CleanseCooldown,
@@ -210,7 +213,11 @@ public static class SkillRegistry
                         continue;
                     }
 
-                    var cut = current * CleansePercentPerStatus;
+                    // 寒冷额外多清（用户定的 50%），其余负面用 CleansePercentPerStatus（10%）。
+                    var factor = statusType == CharacterAfflictions.STATUSTYPE.Cold
+                        ? CleanseColdPercent
+                        : CleansePercentPerStatus;
+                    var cut = current * factor;
                     afflictions.SubtractStatus(statusType, cut);
                     removed += cut;
                 }

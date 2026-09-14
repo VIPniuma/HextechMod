@@ -7,7 +7,7 @@ schemaVersion = "0.0.1"
 namespace = "PeakModder"
 name = "HextechMod"
 versionNumber = "0.0.0"
-description = "海克斯强化模组。作者QQ：1330144749，反馈群：734080790"
+description = "PEAK 海克斯强化模组：登岛与每次篝火点燃后各来一次「局内 3 选 1」，选定立即生效、可叠加，共 80+ 条海克斯词条（含主动技能、能量、代币商店与行李箱开箱抽奖）。作者QQ：1330144749，反馈群：734080790"
 websiteUrl = "https://github.com/VIPniuma/HextechMod"
 containsNsfwContent = false
 
