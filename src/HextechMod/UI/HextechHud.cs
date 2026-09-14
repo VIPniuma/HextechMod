@@ -7,8 +7,8 @@ namespace PeakModder.HextechMod;
 /// <summary>
 /// 轻量 HUD：只保留「顶部居中的操作提示」与「本局还没禁用海克斯」的常驻提醒。
 /// <para>
-/// 原先贴在右侧的「已获得词条」面板已移除（见 <see cref="HextechCodex"/>：改为按 K 打开的海克斯页面）。
-/// 代币 / 能量 / 开商店提示改挂到技能 HUD 右侧（见 <see cref="HextechSkillHud"/>）。
+/// 原先贴在右侧的「已获得词条」面板已移除（见 <see cref="HextechCodex"/>：改为按住 K 查看的海克斯页面）。
+/// 代币 / 开商店提示改挂到技能 HUD 右侧（见 <see cref="HextechSkillHud"/>）。
 /// 这里的 <see cref="Toast"/> 仍是全模组共用的浮层提示入口。
 /// </para>
 /// </summary>

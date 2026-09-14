@@ -7,7 +7,7 @@ using UnityEngine.UI;
 namespace PeakModder.HextechMod;
 
 /// <summary>
-/// 「海克斯页面」：按 K（界面.打开海克斯页面）打开的本局持有总览。
+/// 「海克斯页面」：按住 K（界面.打开海克斯页面）查看的本局持有总览，松开即关。
 /// <para>
 /// 以三选一那种方块卡片的方式陈列：左侧第一张是已解锁的<b>技能</b>，
 /// 右侧最多四张是已获得的<b>海克斯</b>（普通词条，最多 4 条）。
@@ -18,7 +18,7 @@ namespace PeakModder.HextechMod;
 public sealed class HextechCodex : MonoBehaviour
 {
     private const float CardWidth = 340f;
-    private const float CardHeight = 470f;
+    private const float CardHeight = 560f;
     private const float CardGap = 36f;
     private const float RowWidth = 1844f; // 5 张卡排开时整行按它缩，避免最外侧跑到屏幕外。
 
@@ -76,15 +76,24 @@ public sealed class HextechCodex : MonoBehaviour
         return panel;
     }
 
-    public void Toggle()
+    /// <summary>
+    /// 「按住 K 查看」用的开关：按住期间每帧都会调进来，所以状态没变时必须直接返回 ——
+    /// 否则每次都会重置淡入进度与卡片签名，页面会永远停在透明、并且每帧重建卡片。
+    /// </summary>
+    public void SetOpen(bool open)
     {
-        if (IsOpen)
+        if (open == IsOpen)
         {
-            Close();
+            return;
+        }
+
+        if (open)
+        {
+            Open();
         }
         else
         {
-            Open();
+            Close();
         }
     }
 
@@ -129,7 +138,7 @@ public sealed class HextechCodex : MonoBehaviour
 
         _hint = UiFactory.Label(
             root,
-            "按 K 或 ESC 关闭",
+            "松开 K 关闭",
             22f,
             TextAlignmentOptions.Center,
             UiFactory.TextMuted);
@@ -166,12 +175,6 @@ public sealed class HextechCodex : MonoBehaviour
     {
         if (!IsOpen)
         {
-            return;
-        }
-
-        if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            Close();
             return;
         }
 
@@ -446,8 +449,11 @@ public sealed class HextechCodex : MonoBehaviour
         description.rectTransform.anchorMin = new Vector2(0f, 1f);
         description.rectTransform.anchorMax = new Vector2(1f, 1f);
         description.rectTransform.pivot = new Vector2(0.5f, 1f);
-        description.rectTransform.offsetMin = new Vector2(28f, -228f);
-        description.rectTransform.offsetMax = new Vector2(-28f, -360f);
+        // 注意 offsetMin 是「下边」、offsetMax 是「上边」（都相对卡片顶边），下边必须更负 ——
+        // 之前这两个值写反了，矩形高度成了负数，长介绍会溢出并和下面的「效果」叠在一起。
+        // 现在描述区 = 卡片顶部往下 214~424，效果区从 430 起，中间留 6px 间隙。
+        description.rectTransform.offsetMin = new Vector2(28f, -424f);
+        description.rectTransform.offsetMax = new Vector2(-28f, -214f);
 
         var effect = UiFactory.Label(card, string.Empty, 22f, TextAlignmentOptions.TopLeft, UiFactory.TextPrimary);
         effect.rectTransform.anchorMin = new Vector2(0f, 0f);

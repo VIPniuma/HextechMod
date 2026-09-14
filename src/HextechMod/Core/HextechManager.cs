@@ -68,9 +68,6 @@ public sealed class HextechManager : MonoBehaviour
     private int _runElapsedAsks;
     private bool _runElapsedAnswered;
 
-    // K 键切换海克斯页面的同帧去重标记（见 HandleHudInput）。
-    private bool _codexToggleGuard;
-
     /// <summary>这次进机场有没有已经清过一局。用来兜住「插件是在机场场景之后才装起来的」那种启动。</summary>
     private bool _airportResetDone;
 
@@ -863,11 +860,10 @@ public sealed class HextechManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 面板键（K）：打开 / 关闭「海克斯页面」本局持有总览（见 <see cref="HextechCodex"/>）。
+    /// 面板键（K）：<b>按住</b>查看「海克斯页面」本局持有总览（见 <see cref="HextechCodex"/>），松开即关。
     /// <para>
-    /// 关闭由页面自己处理（按 K / ESC 都会关），这里只负责「没开的时候把它打开」——
-    /// 页面开着时 <see cref="IsAnyUiOpen"/> 已经为 true，这一段不会被调到，
-    /// 所以不会出现「按一下开了、同一帧又被自己关掉」。
+    /// 这一段每帧都会走到：图鉴<b>不算</b>在 <see cref="IsAnyUiOpen"/> 里（它只是「按住看一眼」，
+    /// 不该挡住放技能等操作），所以页面开着时依然能检测到松手，不会卡住关不掉。
     /// </para>
     /// </summary>
     private void HandleHudInput()
@@ -876,23 +872,11 @@ public sealed class HextechManager : MonoBehaviour
 
         if (key == KeyCode.None)
         {
+            HextechCodex.Instance?.SetOpen(false);
             return;
         }
 
-        if (Input.GetKeyDown(key))
-        {
-            // 按下那一帧切一次；按住期间（GetKeyDown 只触发一帧）靠这个标记挡住重复切换，
-            // 松开后才解禁，这样「开的一帧不会被同一个按键又关掉 / 反之」。
-            if (!_codexToggleGuard)
-            {
-                _codexToggleGuard = true;
-                HextechCodex.Instance?.Toggle();
-            }
-        }
-        else if (!Input.GetKey(key))
-        {
-            _codexToggleGuard = false;
-        }
+        HextechCodex.Instance?.SetOpen(Input.GetKey(key));
     }
 
     /// <summary>

@@ -9,7 +9,8 @@ namespace PeakModder.HextechMod;
 /// <summary>
 /// 屏幕正下方的技能 HUD：已解锁技能排成一排，显示 CD、能量消耗与当前选中技能。
 /// <para>
-/// 右侧挂一个「能量 / 代币」小条，并提示按 L 打开商店（原先在右侧大面板里的钱包条挪到了这里）。
+/// 右侧挂一个「代币」小条，并提示按 L 打开商店（原先在右侧大面板里的钱包条挪到了这里；
+/// 能量条已移除，能量只在技能卡的「耗能够不够」配色上体现）。
 /// </para>
 /// </summary>
 public sealed class HextechSkillHud : MonoBehaviour
@@ -24,7 +25,7 @@ public sealed class HextechSkillHud : MonoBehaviour
     private const float CostHeight = 22f;
     private const float BottomOffset = 26f;
 
-    private const float WalletWidth = 300f;
+    private const float WalletWidth = 200f;
     private const float WalletHeight = 76f;
     private const float WalletGap = 18f;
 
@@ -82,7 +83,7 @@ public sealed class HextechSkillHud : MonoBehaviour
         _titleLabel.rectTransform.anchoredPosition = new Vector2(0f, BottomOffset);
         _titleLabel.rectTransform.sizeDelta = new Vector2(800f, 26f);
 
-        // 右侧的钱包条：能量 + 代币 + 按 L 开商店。原先在右侧大面板里，现在挪到技能 HUD 旁边。
+        // 右侧的钱包条：代币 + 按 L 开商店。原先在右侧大面板里，现在挪到技能 HUD 旁边（不再显示能量）。
         _wallet = UiFactory.Rounded(root, UiFactory.PanelHighlight, 16);
         _wallet.rectTransform.anchorMin = new Vector2(0.5f, 0f);
         _wallet.rectTransform.anchorMax = new Vector2(0.5f, 0f);
@@ -202,9 +203,8 @@ public sealed class HextechSkillHud : MonoBehaviour
 
     private void RefreshWallet(HextechState state)
     {
-        var accentHex = ColorUtility.ToHtmlStringRGB(UiFactory.Accent);
         var warnHex = ColorUtility.ToHtmlStringRGB(UiFactory.Warning);
-        var signature = $"{state.Energy:0}|{state.TokensTenths}|{ModConfig.ShopKey.Value}";
+        var signature = $"{state.TokensTenths}|{ModConfig.ShopKey.Value}";
 
         if (_shownWallet == signature)
         {
@@ -213,9 +213,7 @@ public sealed class HextechSkillHud : MonoBehaviour
 
         _shownWallet = signature;
 
-        _walletTop.text =
-            $"<color=#{accentHex}>⚡ {state.Energy:0}/{HextechState.MaxEnergy}</color>"
-            + $"    <color=#{warnHex}>◈ {HextechState.FormatTokens(state.Tokens)} 代币</color>";
+        _walletTop.text = $"<color=#{warnHex}>◈ {HextechState.FormatTokens(state.Tokens)} 代币</color>";
         _walletShop.text = $"按 {ModConfig.ShopKey.Value} 打开商店";
     }
 
