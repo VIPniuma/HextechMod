@@ -16,7 +16,7 @@ public sealed class HextechPlugin : BaseUnityPlugin
 {
     public const string Guid = "PeakModder.HextechMod";
     public const string Name = "HextechMod";
-    public const string Version = "0.3.32";
+    public const string Version = "0.3.33";
 
     internal static HextechPlugin Instance = null!;
     internal static ManualLogSource Log = null!;

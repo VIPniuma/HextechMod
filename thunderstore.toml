@@ -8,7 +8,7 @@ namespace = "PeakModder"
 name = "HextechMod"
 versionNumber = "0.0.0"
 description = "海克斯强化模组"
-websiteUrl = "https://github.com/<你的用户名>/海克斯mod"
+websiteUrl = "https://github.com/VIPniuma/HextechMod"
 containsNsfwContent = false
 
 [build]
