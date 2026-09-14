@@ -7,7 +7,7 @@ schemaVersion = "0.0.1"
 namespace = "PeakModder"
 name = "HextechMod"
 versionNumber = "0.0.0"
-description = "海克斯强化模组"
+description = "海克斯强化模组。作者QQ：1330144749，反馈群：734080790"
 websiteUrl = "https://github.com/VIPniuma/HextechMod"
 containsNsfwContent = false
 
