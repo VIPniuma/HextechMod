@@ -43,4 +43,4 @@ jobs:
           TCLI_AUTH_TOKEN: ${{ secrets.TCLI_AUTH_TOKEN }}
         run: |
           ZIP="artifacts/thunderstore/release/PeakModder-HextechMod-${{ steps.ver.outputs.version }}.zip"
-          dotnet tcli publish --file "$ZIP" --config-path thunderstore.toml
+          tcli publish --file "$ZIP"
