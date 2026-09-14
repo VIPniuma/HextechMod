@@ -774,9 +774,8 @@ public sealed class HextechManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 配置面板的快捷键。主入口是 ESC → 设置（原生设置页最上面那行「海克斯模组设置」，
-    /// 见 <see cref="HextechSettingsMenuEntry"/>），这个键是留给「设置页入口没插上」
-    /// 或者单纯更习惯按键的玩家的。
+    /// 配置面板的入口。原生设置页里那行「海克斯模组设置」已在 2026-09-15 移除，
+    /// 现在只剩这一个快捷键入口。
     /// </summary>
     private void HandleConfigInput(bool uiOpen)
     {

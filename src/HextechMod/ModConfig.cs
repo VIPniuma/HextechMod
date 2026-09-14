@@ -37,7 +37,6 @@ internal static class ModConfig
     public static ConfigEntry<KeyCode> ChoiceKey = null!;
     public static ConfigEntry<KeyCode> ConfigPanelKey = null!;
     public static ConfigEntry<KeyCode> ReportKey = null!;
-    public static ConfigEntry<bool> AddSettingsMenuEntry = null!;
     public static ConfigEntry<bool> CheckUpdateOnStart = null!;
     public static ConfigEntry<string> UpdateFeedUrl = null!;
     public static ConfigEntry<string> IgnoredUpdateVersion = null!;
@@ -123,13 +122,6 @@ internal static class ModConfig
             + "HextechMod-report.txt，直接把那个文件发给作者效果一样。"
             + "只有你自己按下这个键才会传，不会自动上传；包里含你的游戏昵称、房间人数、本局词条与这份配置，"
             + "觉得不方便就别按。");
-
-        AddSettingsMenuEntry = config.Bind(
-            "界面",
-            "设置里加入口",
-            true,
-            "在游戏原生的「设置」页（ESC → 设置 / 主菜单 → 设置）最上面插一行「海克斯模组设置」，"
-            + "点它就打开这个配置面板。关掉的话就只剩上面那个快捷键入口。");
 
         ChoiceKey = config.Bind(
             "界面",
@@ -321,7 +313,6 @@ internal static class ModConfig
             || entry == ChoiceKey
             || entry == ConfigPanelKey
             || entry == ReportKey
-            || entry == AddSettingsMenuEntry
             || entry == CampfireAfkGuard
             || entry == CarryGuard
             || entry == CheckUpdateOnStart
@@ -398,7 +389,6 @@ internal static class ModConfig
         Adopt(config, ResurrectKey, "Skill", "ResurrectKey");
         Adopt(config, HudToggleKey, "UI", "HudToggleKey");
         Adopt(config, ShopKey, "Shop", "ShopKey");
-        Adopt(config, AddSettingsMenuEntry, "界面", "暂停菜单里加入口");
         Adopt(config, TokensPerMinute, "Shop", "TokensPerMinute");
         Adopt(config, ShopPriceMultiplier, "Shop", "ShopPriceMultiplier");
         Adopt(config, LuggageTokenChance, "Luggage", "LuggageTokenChance");

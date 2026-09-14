@@ -30,7 +30,7 @@ internal sealed class HextechWindowHost : MenuWindow
     public override bool selectOnOpen => false;
 
     // 这两条必须是 false，别再改回 true：
-    // 「海克斯设置」是从游戏原生的设置页里点开的，点下去的那一刻游戏正处在暂停 / 取消状态，
+    // 「海克斯设置」是玩家按 F9 打开的，按下去的那一刻游戏可能正处在暂停 / 取消状态，
     // 窗口会在压进 MenuWindow.AllActiveWindows 的下一帧被这两条规则直接关掉。
     // Player.log 里能直接看到这个循环（opening window → 紧接着 HextechWindow closing.），
     // 玩家看到的就是「点了没反应 / 海克斯设置打不开」。
@@ -52,12 +52,6 @@ internal sealed class HextechWindowHost : MenuWindow
     /// 界面据此判断「该收起来了」。
     /// </summary>
     public static bool IsOpen => _host != null && _host.isOpen;
-
-    /// <summary>
-    /// 窗口对象本身。打开界面前要把游戏原生的窗口（点入口时就是「设置」所在的菜单窗口）先关掉，
-    /// 见 <c>HextechSettingsMenuEntry.CloseOtherWindows</c> —— 那里要靠它把自己排除掉。
-    /// </summary>
-    public static MenuWindow? Window => _host;
 
     public static void Create(Transform parent)
     {

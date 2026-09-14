@@ -75,10 +75,10 @@ public sealed class HextechPlugin : BaseUnityPlugin
             $"开行李箱改成抽奖（可能抽到负面海克斯）。" +
             $"按 {ModConfig.SkillKey.Value} 释放技能，按 {ModConfig.CycleSkillKey.Value} 切换技能，" +
             $"按 {ModConfig.ShopKey.Value} 打开商店（每分钟发 {ModConfig.TokensPerMinute.Value:0.##} 枚代币），" +
-            $"按 {ModConfig.HudToggleKey.Value} 打开海克斯页面（本局持有的技能与海克斯总览），" +
+            $"按住 {ModConfig.HudToggleKey.Value} 查看海克斯页面（本局持有的技能与海克斯总览），" +
             $"按 {ModConfig.BanPanelKey.Value} 在机场禁用词条，" +
             $"按 {ModConfig.ChoiceKey.Value} 重新打开还没选的三选一，" +
-            $"按 {ModConfig.ConfigPanelKey.Value} 打开海克斯设置（也能从 ESC → 设置 里那行「海克斯模组设置」进）。" +
+            $"按 {ModConfig.ConfigPanelKey.Value} 打开海克斯设置。" +
             $"遇到 bug 可以按 {ModConfig.ReportKey.Value} 上传日志，会回一个编号给你。");
     }
 
