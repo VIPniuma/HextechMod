@@ -8,7 +8,7 @@
     <!-- This is the display name of your mod. -->
     <AssemblyTitle>HextechMod</AssemblyTitle>
     <!-- The version number for your assembly, BepInEx plugin, and Thunderstore package. -->
-    <Version>0.3.46</Version>
+    <Version>0.3.47</Version>
     <RootNamespace>PeakModder.HextechMod</RootNamespace>
   </PropertyGroup>
 
