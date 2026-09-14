@@ -184,7 +184,7 @@ internal static class DefaultHextechs
         AdvancedHextechs.Register();
     }
 
-    // ── 青铜（10%）───────────────────────────────────────────────
+    // ── 青铜（8%）───────────────────────────────────────────────
     /// <summary>单属性小加成与一次性小补给：抽到不会兴奋，但永远不亏。</summary>
     private static void RegisterBronze()
     {
@@ -267,7 +267,7 @@ internal static class DefaultHextechs
             maxStacks: 3));
     }
 
-    // ── 白银（15%）───────────────────────────────────────────────
+    // ── 白银（12%）───────────────────────────────────────────────
     /// <summary>
     /// 核心资源削减、有时限的强 buff、主动技能解锁 —— 一局里能实打实省事的那一档。
     /// 纯收益但不改变玩法规则的机制（幸运旅客、厨师之类）也留在这一档。
@@ -582,11 +582,11 @@ internal static class DefaultHextechs
         // 从白银升上来：摔落伤害几乎免疫直接抹掉了这游戏最大的一条死因。
         // 没有 onAcquired：减免由 HextechPatches.AddStatus 前缀在每次摔落时乘
         // FeatherFallFactorPerStack 完成（原版的 CapFallDamage 是一次性窗口，撑不住一整局）。
-        // 2026-09-13 用户拍板：-98% 保留不动（羽落不削）。
+        // 2026-09-14 用户拍板：从 -98%（几乎完全免疫）削到 -50%（落地伤害减半）。
         Register(new ActionHextech(
             FeatherFallId,
             "羽落",
-            "摔落伤害几乎完全免疫。",
+            "摔落造成的伤势 -50%（落地伤害减半）。",
             quality,
             drawback: Cost(
                 "落地太轻，蹬地也使不上劲：地面移动速度 -8%。",

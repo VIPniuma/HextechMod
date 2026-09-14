@@ -16,7 +16,7 @@
   <PropertyGroup>
     <IsThunderstorePackable>true</IsThunderstorePackable>
     <ThunderstoreName>HextechMod</ThunderstoreName>
-    <ThunderstoreDescription>海克斯强化模组</ThunderstoreDescription>
+    <ThunderstoreDescription>海克斯强化模组。作者QQ：1330144749，反馈群：734080790</ThunderstoreDescription>
     <ThunderstoreCommunities>peak</ThunderstoreCommunities>
     <ThunderstoreCategories>mods</ThunderstoreCategories>
   </PropertyGroup>
