@@ -42,12 +42,10 @@
     <PackageReference Include="HarmonyX" Version="2.9.0" />
   </ItemGroup>
 
-  <!-- NuGet fallback stripped game references -->
-  <ItemGroup Condition="!Exists('$(ManagedDir)')">
-    <PackageReference Include="UnityEngine.Modules" Version="6000.0.36" PrivateAssets="all" />
-  </ItemGroup>
-
-  <!-- Local game references -->
+  <!--
+    Game references: prefer the local copy of PEAK (so builds use the exact game version).
+    In CI / machines without the game installed, fall back to the committed lib/ snapshot.
+  -->
   <ItemGroup Condition="Exists('$(ManagedDir)')">
     <LocalReferences
       Include="$(ManagedDir)*.dll"
@@ -55,6 +53,15 @@
     />
     <Reference Include="@(LocalReferences)" Private="false" />
     <Reference Include="$(ManagedDir)Assembly-CSharp.dll" Private="false" Publicize="true" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(ManagedDir)')">
+    <LocalReferences
+      Include="$(SolutionRoot)lib/*.dll"
+      Exclude="$(SolutionRoot)lib/Mono*.dll;$(SolutionRoot)lib/netstandard.dll;$(SolutionRoot)lib/System*.dll;$(SolutionRoot)lib/mscorlib.dll;$(SolutionRoot)lib/Assembly-CSharp.dll"
+    />
+    <Reference Include="@(LocalReferences)" Private="false" />
+    <Reference Include="$(SolutionRoot)lib/Assembly-CSharp.dll" Private="false" Publicize="true" />
   </ItemGroup>
 
   <!-- Copy mod files defined in projects to the target BepInEx directory -->
