@@ -22,7 +22,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Extract version from tag
         id: ver
@@ -32,8 +32,8 @@ jobs:
         run: |
           sed -i "s|<Version>.*</Version>|<Version>${{ steps.ver.outputs.version }}</Version>|" src/HextechMod/HextechMod.csproj
 
-      - name: Pack Thunderstore package
-        run: dotnet pack src/HextechMod/HextechMod.csproj -c Release
+      - name: Build Release and pack Thunderstore package
+        run: dotnet build src/HextechMod/HextechMod.csproj -c Release -p:DeployModFiles=false
 
       - name: Install tcli
         run: dotnet tool install -g tcli --prerelease
