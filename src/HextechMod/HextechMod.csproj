@@ -8,7 +8,7 @@
     <!-- This is the display name of your mod. -->
     <AssemblyTitle>HextechMod</AssemblyTitle>
     <!-- The version number for your assembly, BepInEx plugin, and Thunderstore package. -->
-    <Version>0.3.40</Version>
+    <Version>0.3.41</Version>
     <RootNamespace>PeakModder.HextechMod</RootNamespace>
   </PropertyGroup>
 
@@ -16,7 +16,7 @@
   <PropertyGroup>
     <IsThunderstorePackable>true</IsThunderstorePackable>
     <ThunderstoreName>HextechMod</ThunderstoreName>
-    <ThunderstoreDescription>海克斯强化模组。作者QQ：1330144749，反馈群：734080790</ThunderstoreDescription>
+    <ThunderstoreDescription>PEAK 海克斯强化模组：登岛与每次篝火点燃后各来一次「局内 3 选 1」，选定立即生效、可叠加，共 80+ 条海克斯词条，含主动技能、能量、代币商店与行李箱开箱抽奖。给朋友装直接用仓库里的图形化「一键安装器」（单个 exe），装/更新时联网从更新服务器拉最新版模组本体，安装器本身不再内置 mod。作者QQ：1330144749，反馈群：734080790</ThunderstoreDescription>
     <ThunderstoreCommunities>peak</ThunderstoreCommunities>
     <ThunderstoreCategories>mods</ThunderstoreCategories>
   </PropertyGroup>
