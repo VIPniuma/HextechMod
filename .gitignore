@@ -6,3 +6,5 @@ artifacts/
 config/
 BepInEx/
 Config.Build.user.props
+FodyWeavers.xsd
+
