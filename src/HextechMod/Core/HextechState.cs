@@ -27,7 +27,16 @@ public sealed class HextechState : MonoBehaviour
     private readonly List<int> _stacks = new();
     private readonly List<SkillId> _skills = new();
     private readonly Dictionary<string, float> _timers = new();
-    private readonly HashSet<int> _rewardedCampfires = new();
+    /// <summary>
+    /// 本局已经给过「登岛 / 篝火」奖励的 segment 集合，避免同一段重复弹三选一。
+    /// <para>
+    /// 2026-09-16 改：以前是「每个角色一个 HashSet」，但 PEAK 复活会重建角色（新 HextechState），
+    /// 标记就空了 —— 于是死亡复活后再落地 / 再点篝火，登岛强化会重新弹出来（用户反馈的「死了要重新抽海克斯」）。
+    /// 现在按「稳定玩家身份」（actor 号，回机场前不会变）存进静态字典，复活重建角色也不丢，
+    /// 一回机场（<see cref="ResetForNewRun"/>）整体清空。
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<int, HashSet<int>> ClaimedRewardsByActor = new();
 
     // 「拾取结算」去重：键是物品实例 GUID（随槽位数据走，切手 / 切背包都不会变）。
     // 读不到 GUID 时**不结算**、也绝不退回物体身份（网络 ID / 实例 ID 每切一次都变，
@@ -79,11 +88,11 @@ public sealed class HextechState : MonoBehaviour
 
     public float EnergyRatio => Mathf.Clamp01(Energy / MaxEnergy);
 
-    /// <summary>商店代币。局内连续累积（带小数），回机场清零。</summary>
-    public float Tokens => _tokens;
+    /// <summary>商店代币。局内连续累积（带小数），回机场清零。共享代币模式下改从共享池读。</summary>
+    public float Tokens => ModConfig.SharedTokens.Value ? SharedTokenPool.Balance : _tokens;
 
     /// <summary>代币 ×10 向下取整 —— UI 用它判断「显示的那一位小数变没变」，免得每帧重写字符串。</summary>
-    public int TokensTenths => Mathf.FloorToInt(_tokens * 10f);
+    public int TokensTenths => ModConfig.SharedTokens.Value ? Mathf.FloorToInt(SharedTokenPool.Balance * 10f) : Mathf.FloorToInt(_tokens * 10f);
 
     /// <summary>
     /// 代币的显示口径：**向下**取一位小数（不四舍五入）。
@@ -384,7 +393,16 @@ public sealed class HextechState : MonoBehaviour
     /// </summary>
     public bool TryClaimCampfireReward(int segment)
     {
-        return _rewardedCampfires.Add(segment);
+        // 按稳定玩家身份记，复活重建角色也不丢（见 ClaimedRewardsByActor 的说明）。
+        var actor = Character?.refs?.view?.OwnerActorNr ?? 0;
+
+        if (!ClaimedRewardsByActor.TryGetValue(actor, out var set))
+        {
+            set = new HashSet<int>();
+            ClaimedRewardsByActor[actor] = set;
+        }
+
+        return set.Add(segment);
     }
 
     /// <summary>
@@ -443,6 +461,12 @@ public sealed class HextechState : MonoBehaviour
     /// </summary>
     public bool TrySpendTokens(int cost)
     {
+        // 共享代币模式：扣费走共享池（房主权威，普通客户端乐观扣本地再请房主正式扣）。
+        if (ModConfig.SharedTokens.Value)
+        {
+            return SharedTokenPool.TrySpend(cost);
+        }
+
         if (cost <= 0 || _tokens < cost)
         {
             return false;
@@ -455,6 +479,13 @@ public sealed class HextechState : MonoBehaviour
     /// <summary>发代币（拾荒者 +1、行李箱抽到、中途加入补足都走这里）。<paramref name="amount"/> 可以带小数。</summary>
     public void AddTokens(float amount)
     {
+        // 商店关了 = 代币功能整体关掉（2026-09-16）：所有「发币」入口统一在这里掐断。
+        // 被动积累走 AccrueTokens（不进这个方法），那里另有一道同样的闸。
+        if (!ModConfig.ShopEnabled.Value)
+        {
+            return;
+        }
+
         _tokens = Mathf.Max(0f, _tokens + amount);
     }
 
@@ -463,16 +494,25 @@ public sealed class HextechState : MonoBehaviour
     /// 同一件物品被丢掉再捡起来不会重复发 —— 去重和「烫手 / 机能零食」
     /// 共用 <see cref="TryMarkPickupSettled(Item)"/>（按物品实例 GUID 记），这里只管发币。
     /// </summary>
-    public int ScavengerTokensEarned { get; private set; }
+    /// <summary>「拾荒者」每捡起一件物品发放的代币数（小数）。2026-09-16 从 +1 改成 +0.3 做削弱：PEAK 里可捡物品极多，+1/件等于白嫖几十枚、商店变免费。</summary>
+    public const float ScavengerTokenPerPickup = 0.3f;
 
-    /// <summary>「拾荒者」：发一枚代币并提示。不设每局上限，捡多少给多少。</summary>
+    /// <summary>
+    /// 「拾荒者」本局靠捡东西发出的代币数（回机场清零），**只用于提示，不封顶**。
+    /// 同一件物品被丢掉再捡起来不会重复发 —— 去重和「烫手 / 机能零食」
+    /// 共用 <see cref="TryMarkPickupSettled(Item)"/>（按物品实例 GUID 记），这里只管发币。
+    /// <para>2026-09-16 起改成小数累计（见 <see cref="ScavengerTokenPerPickup"/>）。</para>
+    /// </summary>
+    public float ScavengerTokensEarned { get; private set; }
+
+    /// <summary>「拾荒者」：发 <see cref="ScavengerTokenPerPickup"/> 枚代币并提示。小数累计、不设每局上限，捡多少给多少。</summary>
     public void AwardScavengerToken()
     {
-        ScavengerTokensEarned++;
-        AddTokens(1);
-        RecordEffect(DefaultHextechs.ScavengerId, 1f);
+        ScavengerTokensEarned += ScavengerTokenPerPickup;
+        AddTokens(ScavengerTokenPerPickup);
+        RecordEffect(DefaultHextechs.ScavengerId, ScavengerTokenPerPickup);
 
-        HextechHud.Toast($"拾荒者：+1 商店代币（本局 {ScavengerTokensEarned} 枚）");
+        HextechHud.Toast($"拾荒者：+{ScavengerTokenPerPickup:0.0} 商店代币（本局 {ScavengerTokensEarned:0.0} 枚）");
     }
 
     /// <summary>本局这件商品买过几次（商店限购用，回机场清零）。</summary>
@@ -624,6 +664,34 @@ public sealed class HextechState : MonoBehaviour
             return;
         }
 
+        // 商店关了 = 代币功能整体关掉（2026-09-16）：被动积累停在这里。
+        if (!ModConfig.ShopEnabled.Value)
+        {
+            return;
+        }
+
+        // 共享代币模式：代币由 SharedTokenPool 在房主侧统一累积，这里不再给个人加钱。
+        if (ModConfig.SharedTokens.Value)
+        {
+            return;
+        }
+
+        // 鬼魂 / 死亡 / 完全昏迷：不积累代币（2026-09-16 用户反馈鬼魂还能累计）。
+        // 注意这里用的是每个角色自己的状态：克隆体 / 幽灵 / 还没醒的队友都不该往池子里加钱。
+        var ch = Character;
+
+        if (ch != null && ch.data != null && (ch.data.dead || ch.data.fullyPassedOut || ch.IsGhost))
+        {
+            return;
+        }
+
+        // 挂机惩罚改版（2026-09-16）：站在点着的篝火 25 米范围内不再积累代币。
+        // 这是「挂机惩罚」的新含义 —— 以前的「叫蘑菇僵尸」那段已经整个拿掉了（见 CampfireZombieGuard 的删除）。
+        if (ModConfig.CampfireAfkGuard.Value && ch != null && AdvancedHextechs.IsNearLitCampfire(ch, ModConfig.CampfireAfkRadius.Value))
+        {
+            return;
+        }
+
         // 「收藏家」按层数给代币积累速度加成（1 层 +50%，2 层 +100%）；
         // 「资本家」是按「每分钟多几枚」算的绝对收入，换算成速率后直接相加。
         var rate = 1f / interval;
@@ -769,7 +837,7 @@ public sealed class HextechState : MonoBehaviour
         _activeFrames.Clear();
         _skills.Clear();
         _timers.Clear();
-        _rewardedCampfires.Clear();
+        ClaimedRewardsByActor.Clear();
         _settledItemInstances.Clear();
         _purchases.Clear();
         _skillIndex = 0;

@@ -203,6 +203,15 @@ public sealed class HextechSkillHud : MonoBehaviour
 
     private void RefreshWallet(HextechState state)
     {
+        // 商店关了 = 代币功能整体关掉（2026-09-16）：钱包条直接藏起来，免得显示一串没用的 0。
+        if (!ModConfig.ShopEnabled.Value)
+        {
+            _wallet.gameObject.SetActive(false);
+            return;
+        }
+
+        _wallet.gameObject.SetActive(true);
+
         var warnHex = ColorUtility.ToHtmlStringRGB(UiFactory.Warning);
         var signature = $"{state.TokensTenths}|{ModConfig.ShopKey.Value}";
 

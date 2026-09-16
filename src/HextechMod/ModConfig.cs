@@ -19,6 +19,7 @@ internal static class ModConfig
     public static ConfigEntry<KeyCode> SkillKey = null!;
     public static ConfigEntry<KeyCode> CycleSkillKey = null!;
     public static ConfigEntry<KeyCode> ShopKey = null!;
+    public static ConfigEntry<bool> ShopEnabled = null!;
     public static ConfigEntry<float> TokensPerMinute = null!;
     public static ConfigEntry<float> ShopPriceMultiplier = null!;
     public static ConfigEntry<float> ShopFunctionPremium = null!;
@@ -29,7 +30,6 @@ internal static class ModConfig
     public static ConfigEntry<bool> CampfireAfkGuard = null!;
     public static ConfigEntry<bool> CarryGuard = null!;
     public static ConfigEntry<float> CampfireAfkRadius = null!;
-    public static ConfigEntry<float> CampfireAfkSeconds = null!;
     public static ConfigEntry<int> LegendaryWeight = null!;
     public static ConfigEntry<KeyCode> ResurrectKey = null!;
     public static ConfigEntry<KeyCode> HudToggleKey = null!;
@@ -37,6 +37,7 @@ internal static class ModConfig
     public static ConfigEntry<KeyCode> ChoiceKey = null!;
     public static ConfigEntry<KeyCode> ConfigPanelKey = null!;
     public static ConfigEntry<KeyCode> ReportKey = null!;
+    public static ConfigEntry<bool> SharedTokens = null!;
     public static ConfigEntry<bool> CheckUpdateOnStart = null!;
     public static ConfigEntry<string> UpdateFeedUrl = null!;
     public static ConfigEntry<string> IgnoredUpdateVersion = null!;
@@ -137,20 +138,35 @@ internal static class ModConfig
             KeyCode.L,
             "打开海克斯商店的按键。");
 
+        ShopEnabled = config.Bind(
+            "游戏玩法",
+            "启用商店",
+            true,
+            "关掉后商店打不开，代币也不再积累（自动连带关闭代币功能）。觉得商店太超标的玩家可以整体关掉。"
+            + "随时能切，不要求只在机场设置。");
+
+        SharedTokens = config.Bind(
+            "游戏玩法",
+            "共享代币",
+            false,
+            "开启后代币变成全房间共享：只在房主侧按「房间人数」的速率累积，任何人花钱都从同一个池子扣。"
+            + "获取速率 = 每分钟 2 枚，每多 2 名玩家再 +1 枚/分。"
+            + "只能在机场开关 —— 进局之后再想改就改不了了（避免半路把别人的池子改没了）。");
+
         TokensPerMinute = config.Bind(
-            "商店",
+            "游戏玩法",
             "每分钟代币",
             1.5f,
             "局内每分钟发多少枚商店代币（连着涨，HUD 显示到一位小数）。默认 1.5 = 40 秒攒出 1 枚。0 = 不发。");
 
         ShopPriceMultiplier = config.Bind(
-            "商店",
+            "游戏玩法",
             "物价倍率",
             1f,
             "商店物价倍率。商品基础价 × 这个值 = 实际售价（向上取整，最低 1）。调低会让游戏简单很多。");
 
         ShopFunctionPremium = config.Bind(
-            "商店",
+            "游戏玩法",
             "功能溢价",
             1f,
             new ConfigDescription(
@@ -192,10 +208,11 @@ internal static class ModConfig
 
         CampfireAfkGuard = config.Bind(
             "防挂机",
-            "篝火挂机惩罚",
+            "篝火内不积累代币",
             true,
-            "在点着的篝火附近站着不动太久，就叫一只蘑菇僵尸来「叫醒」你（原版那只，咬人会疼）。"
-            + "判定由房主做（往世界里生成怪物只有房主做得了），所以联机时只要房主装了这个模组，全房间都会生效。");
+            "在点着的篝火附近（见「篝火范围」）站着时，不再积累商店代币 —— 这就是新版的「挂机惩罚」。"
+            + "以前的「站太久叫一只蘑菇僵尸来咬你」已经整个移除（那个判定在房主侧，反而容易误伤认真在篝火边做饭 / 恢复的玩家）。"
+            + "判定由本地做（每个玩家自己不算自己的代币），所以联机时每个人各自生效。");
 
         CampfireAfkRadius = config.Bind(
             "防挂机",
@@ -203,14 +220,6 @@ internal static class ModConfig
             25f,
             "离点着的篝火多近算「待在篝火边」。默认 25 米。"
             + "没点着的篝火不算 —— 不点火的篝火旁没有安全区，正常也不会有人在那儿停下。");
-
-        CampfireAfkSeconds = config.Bind(
-            "防挂机",
-            "触发时长（秒）",
-            180f,
-            "连续待在篝火范围里多久就叫僵尸出来。默认 180 秒（3 分钟）。"
-            + "中途走出范围不会立刻清零，而是按同样的速度往回退、退到 0 为止 —— 偶尔出去拿个东西再回来是接得上的，"
-            + "真一直站着不动才会攒满。召唤过一次之后计时也归零，继续挂着就每过这么久再来一只。");
 
         CarryGuard = config.Bind(
             "修复",
@@ -313,6 +322,8 @@ internal static class ModConfig
             || entry == ChoiceKey
             || entry == ConfigPanelKey
             || entry == ReportKey
+            || entry == SharedTokens
+            || entry == ShopEnabled
             || entry == CampfireAfkGuard
             || entry == CarryGuard
             || entry == CheckUpdateOnStart

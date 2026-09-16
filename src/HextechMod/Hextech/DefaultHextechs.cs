@@ -228,13 +228,14 @@ internal static class DefaultHextechs
             quality,
             (state, stacks) => state.Character.refs.afflictions.hungerPerSecond *= quality.ReduceFactor(stacks)));
 
-        // 「拾荒者」：每件物品第一次被拾起时给 1 枚代币。
+        // 「拾荒者」：每件物品第一次被拾起时给 0.3 枚代币（小数累计）。
+        // 2026-09-16 从 +1 削弱到 +0.3：PEAK 里散落物品极多，+1/件等于白嫖几十枚、商店变免费。
         // 去重和「烫手 / 机能零食」共用 TryMarkPickupSettled（按物品实例记，
         // 丢了再捡起来不会重复给）。不设每局上限（2026-09-12 按玩家要求去掉原来的 20 枚上限）。
         Register(new ActionHextech(
             ScavengerId,
             "拾荒者",
-            "每件物品第一次被你拾起时 +1 枚商店代币（不设上限，丢了再捡不会重复给）。",
+            "每件物品第一次被你拾起时 +0.3 枚商店代币（小数累计、不设上限，捡多少给多少；丢了再捡不会重复给）。",
             quality));
 
         // 每件物品第一次被拾起时吃一口：身上「每种负面状态」各按自己当前值 -5%。

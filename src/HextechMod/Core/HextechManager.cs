@@ -79,6 +79,7 @@ public sealed class HextechManager : MonoBehaviour
         Instance = this;
         _sceneSettledAt = Time.time;
         SceneManager.sceneLoaded += OnSceneLoaded;
+        PhotonNetwork.NetworkingClient.EventReceived += SharedTokenPool.OnEvent;
     }
 
     /// <summary>
@@ -101,6 +102,7 @@ public sealed class HextechManager : MonoBehaviour
     private void OnDestroy()
     {
         SceneManager.sceneLoaded -= OnSceneLoaded;
+        PhotonNetwork.NetworkingClient.EventReceived -= SharedTokenPool.OnEvent;
 
         if (Instance == this)
         {
@@ -152,7 +154,9 @@ public sealed class HextechManager : MonoBehaviour
         _runElapsedAsks = 0;
         _runElapsedAnswered = false;
         LuggageLottery.Reset();
-        CampfireZombieGuard.Reset();
+
+        // 共享代币池一回机场清空（见 SharedTokenPool）。
+        SharedTokenPool.Reset();
 
         // 禁用名单是一局一清的：回到机场就全部解除，下一局重新选。
         // 所有客户端都在自己的机场场景里走到这里，所以解除本身不需要再同步一轮。
@@ -267,10 +271,8 @@ public sealed class HextechManager : MonoBehaviour
             return;
         }
 
+        SharedTokenPool.Tick(Time.deltaTime);
         state.Tick(Time.deltaTime);
-
-        // 防挂机：在篝火边站着不动太久就叫僵尸。判定放在房主侧，只房主装了这个模组也照样生效。
-        CampfireZombieGuard.Tick(Time.deltaTime);
 
         // 扛人兜底：原版不管「被扛的人醒了 / 死了」，放不下就一直是幽灵状态（详见 CarryGuard）。
         CarryGuard.Tick();
@@ -708,8 +710,30 @@ public sealed class HextechManager : MonoBehaviour
             return;
         }
 
+        // 关店期间如果商店还开着（比如开着的时候在 F9 里把它关了），立刻收掉，别留着。
+        if (shop.IsOpen && !ModConfig.ShopEnabled.Value)
+        {
+            shop.Hide();
+            return;
+        }
+
         if (!Input.GetKeyDown(ModConfig.ShopKey.Value))
         {
+            return;
+        }
+
+        // 商店被关掉了（海克斯设置里的「启用商店」）：开着就收、没开就提示，别让玩家以为能买。
+        if (!ModConfig.ShopEnabled.Value)
+        {
+            if (shop.IsOpen)
+            {
+                shop.Hide();
+            }
+            else
+            {
+                HextechHud.Toast("商店已关闭（在海克斯设置里打开「启用商店」）");
+            }
+
             return;
         }
 

@@ -583,6 +583,17 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
             var entry = row.Entry!;
 
+            // 关店时「物价倍率 / 功能溢价」不能改（调价跟着商店一起关）：吃下这次点击、给个提示，不进编辑。
+            if (PriceLockedByShopOff(entry))
+            {
+                if (Input.GetMouseButtonDown(0))
+                {
+                    HextechHud.Toast("商店已关闭，调价不可用");
+                }
+
+                return true;
+            }
+
             _editing = row;
             _editBuffer = FormatNumber(
                 Convert.ToDouble(entry.BoxedValue, CultureInfo.InvariantCulture),
@@ -648,6 +659,13 @@ public sealed class HextechConfigPanel : MonoBehaviour
     /// </summary>
     private void Apply(ConfigEntryBase entry, int direction)
     {
+        // 共享代币只能在机场开关：进局之后想改就改不了了（避免半路把别人的池子改没）。
+        if (entry == ModConfig.SharedTokens && !HextechScene.InAirport)
+        {
+            HextechHud.Toast("共享代币只能在机场设置");
+            return;
+        }
+
         var type = entry.SettingType;
 
         if (type == typeof(bool))
@@ -816,6 +834,12 @@ public sealed class HextechConfigPanel : MonoBehaviour
             var entry = row.Entry;
             var text = ValueText(entry, row);
 
+            // 共享代币只能机场开关：不在机场时标注「仅机场」（点击会在 Apply 里被挡下）。
+            if (entry == ModConfig.SharedTokens && !HextechScene.InAirport)
+            {
+                text += "（仅机场）";
+            }
+
             if (row.LastText != text)
             {
                 row.LastText = text;
@@ -829,6 +853,12 @@ public sealed class HextechConfigPanel : MonoBehaviour
                 row.LastHighlight = highlight;
                 row.ValueBackground.color = highlight ? UiFactory.Accent : UiFactory.PanelBackgroundLight;
                 row.Value.color = highlight ? UiFactory.PanelBackground : UiFactory.TextPrimary;
+            }
+
+            // 共享代币不在机场时整体置灰，提示改不了。
+            if (entry == ModConfig.SharedTokens && !HextechScene.InAirport)
+            {
+                row.Value.color = UiFactory.TextMuted;
             }
         }
 
@@ -844,6 +874,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
         var field = row.Field!;
         var entry = row.Entry!;
         var editing = _editing == row;
+        var locked = PriceLockedByShopOff(entry);
 
         var text = editing
             ? _editBuffer + (Time.unscaledTime % 1f < 0.5f ? "|" : " ")
@@ -865,6 +896,23 @@ public sealed class HextechConfigPanel : MonoBehaviour
             field.Background.color = editing ? UiFactory.PanelHighlight : UiFactory.PanelBackground;
             field.Text.color = editing ? UiFactory.TextPrimary : UiFactory.Warning;
         }
+
+        // 关店时把「物价倍率 / 功能溢价」这两个调价项钉成置灰，提示改不了（2026-09-16）。
+        // 钉在编辑态判断之外：开着店切到关店这种跨帧的状态切换，编辑态没变也需要每帧重涂一次。
+        if (locked)
+        {
+            field.Background.color = UiFactory.PanelBackground;
+            field.Text.color = UiFactory.TextMuted;
+        }
+    }
+
+    /// <summary>
+    /// 「物价倍率」「功能溢价」是调价的一部分：商店关掉时一起锁死，点也点不进输入框（2026-09-16）。
+    /// </summary>
+    private static bool PriceLockedByShopOff(ConfigEntryBase entry)
+    {
+        return !ModConfig.ShopEnabled.Value
+            && (entry == ModConfig.ShopPriceMultiplier || entry == ModConfig.ShopFunctionPremium);
     }
 
     private static string FormatNumber(double value, bool integer)
@@ -1663,7 +1711,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
             if (!ShopPricing.CanEdit)
             {
-                HextechHud.Toast("联机时只有房主能调整商店价格");
+                HextechHud.Toast(!ModConfig.ShopEnabled.Value ? "商店已关闭，无法调价" : "联机时只有房主能调整商店价格");
                 return;
             }
 
@@ -1699,7 +1747,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
         if (!ShopPricing.CanEdit)
         {
-            HextechHud.Toast("联机时只有房主能调整商店价格");
+            HextechHud.Toast(!ModConfig.ShopEnabled.Value ? "商店已关闭，无法调价" : "联机时只有房主能调整商店价格");
             return;
         }
 
@@ -1764,10 +1812,12 @@ public sealed class HextechConfigPanel : MonoBehaviour
         row.ValueBackground.color = changed ? UiFactory.PanelBackground : UiFactory.PanelBackgroundLight;
     }
 
-    /// <summary>表头：房主（或单人）才是「商店调价」，客户端的标题上直接写明白改不了。</summary>
+    /// <summary>表头：房主（或单人）才是「商店调价」，客户端的标题上直接写明白改不了；商店关了则写「商店已关闭」。</summary>
     private static void RefreshPriceHeader(Row row)
     {
-        var text = ShopPricing.CanEdit ? "商店调价" : "商店调价 · 联机时只有房主能改";
+        var text = !ModConfig.ShopEnabled.Value
+            ? "商店调价 · 商店已关闭"
+            : (ShopPricing.CanEdit ? "商店调价" : "商店调价 · 联机时只有房主能改");
 
         if (row.LastText == text)
         {

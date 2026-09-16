@@ -816,9 +816,8 @@ internal static class LogReporter
             + $"　本局已打：{(HextechManager.Instance?.RunElapsedSeconds ?? 0f):0} 秒");
 
         builder.AppendLine(
-            $"- 篝火挂机惩罚：{(ModConfig.CampfireAfkGuard.Value ? "开" : "关")}"
-            + $"（半径 {ModConfig.CampfireAfkRadius.Value:0.#} 米 / 时长 {ModConfig.CampfireAfkSeconds.Value:0} 秒）"
-            + $" 计时：{CampfireZombieGuard.Describe()}");
+            $"- 篝火范围内不积累代币：{(ModConfig.CampfireAfkGuard.Value ? "开" : "关")}"
+            + $"（半径 {ModConfig.CampfireAfkRadius.Value:0.#} 米；新版「挂机惩罚」—— 旧版的「叫蘑菇僵尸」已移除）");
 
         builder.AppendLine($"- 本机禁用：{HextechBans.Mine ?? "(没禁)"}　全房间禁用：{DescribeBans()}");
         builder.AppendLine(

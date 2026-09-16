@@ -457,6 +457,37 @@ internal static class AdvancedHextechs
         return false;
     }
 
+    /// <summary>
+    /// 距任何一个「点着的、同场景」的篝火中心 <paramref name="radius"/> 米以内即返回 true。
+    /// <para>
+    /// 与 <see cref="IsInsideLitCampfire"/> 的区别：那个用游戏自己的 moraleBoostRadius（篝火光环半径），
+    /// 这个用调用方给的半径（挂机惩罚的「篝火范围」配置，默认 25 米）。代币积累是本地角色自己算的，
+    /// 传进来的就是本地角色，所以这里只看距离、不卡 isLocal。
+    /// </para>
+    /// </summary>
+    internal static bool IsNearLitCampfire(Character character, float radius)
+    {
+        if (character == null)
+        {
+            return false;
+        }
+
+        foreach (var campfire in Campfires())
+        {
+            if (campfire == null || !campfire.Lit || campfire.gameObject.scene != character.gameObject.scene)
+            {
+                continue;
+            }
+
+            if (Vector3.Distance(character.Center, campfire.Center()) <= radius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static List<Campfire> CollectCampfires()
     {
         var field = AccessTools.Field(typeof(Campfire), "ALL_CAMPFIRES");

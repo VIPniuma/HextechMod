@@ -442,6 +442,41 @@ internal static class HextechShopCatalog
         ItemPricing.LogSummary();
     }
 
+    // 2026-09-16 应反馈下架：潘多拉魔盒、诅咒之书（玩家觉得商店这两件超标）。
+    // 显示名是商店里实际看到的中文名（最准），prefab 名作兜底（防止 GetName 取不到时漏网）。
+    private static readonly HashSet<string> BannedShopItemNames = new()
+    {
+        "潘多拉魔盒",
+        "诅咒之书",
+    };
+
+    private static readonly string[] BannedShopItemPrefabHints =
+    {
+        "pandora", "cursedtome", "bookofcurse", "cursesbook",
+    };
+
+    private static bool IsBannedShopItem(Item item, string prefabName)
+    {
+        var name = ResolveName(item, prefabName);
+
+        if (BannedShopItemNames.Contains(name))
+        {
+            return true;
+        }
+
+        var lower = prefabName.ToLowerInvariant();
+
+        foreach (var hint in BannedShopItemPrefabHints)
+        {
+            if (lower.Contains(hint))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>把一件物资塞进对应分类。返回 false 表示这东西不该卖（图鉴、石头、怪物道具、成就收集品等）。</summary>
     private static bool AddItem(Item item)
     {
@@ -472,6 +507,12 @@ internal static class HextechShopCatalog
         var prefabName = item.gameObject.name;
 
         if (string.IsNullOrEmpty(prefabName))
+        {
+            return false;
+        }
+
+        // 2026-09-16 应反馈下架：潘多拉魔盒、诅咒之书（玩家觉得商店这两件超标）。
+        if (IsBannedShopItem(item, prefabName))
         {
             return false;
         }

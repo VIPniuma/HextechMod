@@ -36,8 +36,9 @@ internal static class ShopPricing
 
     /// <summary>
     /// 当前能不能改价：单人（没进房间）随便改，联机房里只有房主说了算。
+    /// <para>2026-09-16 追加：商店被关掉（<see cref="ModConfig.ShopEnabled"/>）时整体不能改价 —— 调价跟着商店一起关。</para>
     /// </summary>
-    public static bool CanEdit => !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
+    public static bool CanEdit => ModConfig.ShopEnabled.Value && (!PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient);
 
     /// <summary>已经改了价的商品件数。</summary>
     public static int Count
