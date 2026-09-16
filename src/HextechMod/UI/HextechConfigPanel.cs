@@ -27,7 +27,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
     private const float CardHeight = 880f;
 
     private const float ViewportTop = 150f;
-    private const float ViewportBottom = 96f;
+    private const float ViewportBottom = 150f;
     private const float ViewportHeight = CardHeight - ViewportTop - ViewportBottom;
 
     private const float SidePadding = 40f;
@@ -68,6 +68,18 @@ public sealed class HextechConfigPanel : MonoBehaviour
         public Image Background = null!;
         public ConfigEntryBase? Entry;
         public bool IsSection;
+
+        /// <summary>这一行属于第几页（每个配置分组、日志上报、商店调价各算一页）。</summary>
+        public int Page;
+
+        /// <summary>这一行在内容区里的顶边（内容坐标系，向下为正），翻页时用来算每页的滚动范围。</summary>
+        public float TopY;
+
+        /// <summary>这一行的高度，配合 <see cref="TopY"/> 算每页的滚动范围。</summary>
+        public float Height;
+
+        /// <summary>小标题（如物资分类）不算新的一页，跟在它所属的大分组里。</summary>
+        public bool IsSubHeader;
 
         /// <summary>「商店调价」那个标题行：文案要跟着「是不是房主」变。</summary>
         public bool IsPriceSection;
@@ -162,13 +174,30 @@ public sealed class HextechConfigPanel : MonoBehaviour
     private string _editBuffer = string.Empty;
 
     private float _scroll;
-    private float _maxScroll;
+
+    /// <summary>当前停在哪一页（每个配置分组 / 日志上报 / 商店调价各一页，0 基）。</summary>
+    private int _page;
+
+    /// <summary>总页数。</summary>
+    private int _pageCount;
+
+    /// <summary>翻页时重算的每页滚动范围（与 <see cref="_page"/> 对应）。</summary>
+    private float[] _pageMin = Array.Empty<float>();
+    private float[] _pageMax = Array.Empty<float>();
+
+    /// <summary>翻页导航条：上一页 / 下一页的点击区域，以及中间的「第 X/Y 页 · 分类名」。</summary>
+    private RectTransform _prevRect = null!;
+    private RectTransform _nextRect = null!;
+    private TextMeshProUGUI _pageTitle = null!;
 
     /// <summary>往下列表的游标（从 0 往下走，所以是负数）；布局和追加新格都靠它。</summary>
     private float _cursor;
 
     /// <summary>当前这一行已经放了几格：满了就换行，整行块会把这里清 0。</summary>
     private int _cellsInRow;
+
+    /// <summary>重算分页时用来给每一行编页码的游标。</summary>
+    private int _currentPage;
 
     /// <summary>「商店调价」的表头和重置行建过没有。</summary>
     private bool _priceSectionBuilt;
@@ -219,7 +248,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
         var subtitle = UiFactory.Label(
             card.transform,
-            "数值点右边的框直接输数字（回车生效）· 开关点一下切换、按键点一下再按新键 · 商品调价在列表最下面",
+            "数值点右边的框直接输数字（回车生效）· 开关点一下切换、按键点一下再按新键 · ◀▶ 翻页看分类 · 商品调价在列表最下面",
             22f,
             TextAlignmentOptions.Center,
             UiFactory.TextMuted);
@@ -251,8 +280,20 @@ public sealed class HextechConfigPanel : MonoBehaviour
         hintRect.anchorMin = new Vector2(0f, 0f);
         hintRect.anchorMax = new Vector2(1f, 0f);
         hintRect.pivot = new Vector2(0.5f, 0f);
-        hintRect.offsetMin = new Vector2(SidePadding, 20f);
-        hintRect.offsetMax = new Vector2(-SidePadding, 88f);
+        hintRect.offsetMin = new Vector2(SidePadding, 76f);
+        hintRect.offsetMax = new Vector2(-SidePadding, 132f);
+
+        // 翻页导航条：左下「上一页」、右下「下一页」、中间「第 X/Y 页 · 分类名」。
+        _prevRect = BuildNavButton(card.transform, SidePadding, "◀ 上一页", false);
+        _nextRect = BuildNavButton(card.transform, -SidePadding, "下一页 ▶", true);
+
+        _pageTitle = UiFactory.Label(card.transform, string.Empty, 22f, TextAlignmentOptions.Center, UiFactory.Accent);
+        var pageTitleRect = _pageTitle.rectTransform;
+        pageTitleRect.anchorMin = new Vector2(0.5f, 0f);
+        pageTitleRect.anchorMax = new Vector2(0.5f, 0f);
+        pageTitleRect.pivot = new Vector2(0.5f, 0f);
+        pageTitleRect.offsetMin = new Vector2(-220f, 12f);
+        pageTitleRect.offsetMax = new Vector2(220f, 66f);
 
         // 说明有长有短（最长的一百多字），挤不下就自动缩一点，别把字裁掉。
         _hint.enableAutoSizing = true;
@@ -260,6 +301,36 @@ public sealed class HextechConfigPanel : MonoBehaviour
         _hint.fontSizeMax = 19f;
 
         _canvas.enabled = false;
+    }
+
+    /// <summary>翻页导航条上的一颗按钮（左下 / 右下）。</summary>
+    private static RectTransform BuildNavButton(Transform parent, float xEdge, string text, bool right)
+    {
+        var rect = UiFactory.Node(right ? "NextPage" : "PrevPage", parent);
+        rect.anchorMin = new Vector2(0f, 0f);
+        rect.anchorMax = new Vector2(0f, 0f);
+        rect.pivot = new Vector2(0f, 0f);
+
+        var width = 168f;
+
+        if (right)
+        {
+            rect.offsetMin = new Vector2(xEdge - width, 12f);
+            rect.offsetMax = new Vector2(xEdge, 66f);
+        }
+        else
+        {
+            rect.offsetMin = new Vector2(xEdge, 12f);
+            rect.offsetMax = new Vector2(xEdge + width, 66f);
+        }
+
+        var background = UiFactory.Rounded(rect, UiFactory.PanelHighlight, 10);
+        UiFactory.Stretch(background.rectTransform);
+
+        var label = UiFactory.Label(rect, text, 22f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
+        UiFactory.Stretch(label.rectTransform);
+
+        return rect;
     }
 
     public void Show()
@@ -277,6 +348,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
         _hover = -1;
         _scroll = 0f;
         _rebinding = null;
+        ApplyPage();
         _group.alpha = 0f;
 
         var closeHint = ModConfig.ConfigPanelKey.Value == KeyCode.None
@@ -435,10 +507,13 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
     private void HandleScroll()
     {
+        var min = _pageCount > 0 ? _pageMin[_page] : 0f;
+        var max = _pageCount > 0 ? _pageMax[_page] : 0f;
+
         // 正在输数值时不滚动：滚了以后输入框会从鼠标底下跑掉。
-        if (_editing != null || _maxScroll <= 0.01f)
+        if (_editing != null || max <= min + 0.01f)
         {
-            _scroll = Mathf.Clamp(_scroll, 0f, _maxScroll);
+            _scroll = Mathf.Clamp(_scroll, min, max);
             _content.anchoredPosition = new Vector2(0f, _scroll);
             return;
         }
@@ -447,7 +522,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
         if (Mathf.Abs(wheel) > 0.01f)
         {
-            _scroll = Mathf.Clamp(_scroll - (wheel * ScrollStep), 0f, _maxScroll);
+            _scroll = Mathf.Clamp(_scroll - (wheel * ScrollStep), min, max);
         }
 
         _content.anchoredPosition = new Vector2(0f, _scroll);
@@ -456,6 +531,13 @@ public sealed class HextechConfigPanel : MonoBehaviour
     private void HandlePointer()
     {
         var mouse = (Vector2)Input.mousePosition;
+
+        // 翻页按钮：在视口外面，先拦下来，免得被下面的行命中逻辑吃掉。
+        if (Input.GetMouseButtonDown(0))
+        {
+            if (Inside(_prevRect, mouse)) { PagePrev(); return; }
+            if (Inside(_nextRect, mouse)) { PageNext(); return; }
+        }
 
         // 输入框先看：编辑期间这一帧的鼠标归它管（点框里接着输，点别处先提交、这次点击照常生效）。
         if (HandleNumberField(mouse))
@@ -657,6 +739,159 @@ public sealed class HextechConfigPanel : MonoBehaviour
     /// 这里管的是开关、按键、以及带可选值列表的单选：左键 = 加 / 下一个，右键 = 减 / 上一个。
     /// </para>
     /// </summary>
+    // ── 分页 ────────────────────────────────────────────────────
+    //
+    // 配置项按分组（Section）分页：每个分组、日志上报、商店调价各占一页，底部用 ◀▶ 翻。
+    // 不再把所有配置堆在一页里上下滚。分页信息在行建好之后一次性算出来，翻页只切可见性 + 滚动范围。
+
+    private void RecomputePages()
+    {
+        if (_rows.Count == 0)
+        {
+            return;
+        }
+
+        _currentPage = -1;
+
+        foreach (var row in _rows)
+        {
+            // 每个大分组（IsSection 且不是物资分类那种小标题）开一页；小标题跟在所属分组里。
+            if (row.IsSection && !row.IsSubHeader)
+            {
+                _currentPage++;
+            }
+
+            row.Page = _currentPage;
+            row.TopY = -row.Rect.anchoredPosition.y;
+            row.Height = row.Rect.sizeDelta.y;
+        }
+
+        _pageCount = _currentPage + 1;
+        _pageMin = new float[_pageCount];
+        _pageMax = new float[_pageCount];
+
+        var cur = -1;
+        var top = float.MaxValue;
+        var bottom = float.MinValue;
+
+        foreach (var row in _rows)
+        {
+            if (row.Page != cur)
+            {
+                if (cur >= 0)
+                {
+                    CommitPage(cur, top, bottom);
+                }
+
+                cur = row.Page;
+                top = float.MaxValue;
+                bottom = float.MinValue;
+            }
+
+            top = Mathf.Min(top, row.TopY);
+            bottom = Mathf.Max(bottom, row.TopY + row.Height);
+        }
+
+        if (cur >= 0)
+        {
+            CommitPage(cur, top, bottom);
+        }
+
+        if (_page >= _pageCount)
+        {
+            _page = _pageCount - 1;
+        }
+
+        if (_page < 0)
+        {
+            _page = 0;
+        }
+
+        if (_pageTitle != null)
+        {
+            _pageTitle.text = $"{PageName(_page)} · 第 {_page + 1}/{_pageCount} 页";
+        }
+    }
+
+    private void CommitPage(int page, float top, float bottom)
+    {
+        var height = bottom - top;
+        _pageMax[page] = Mathf.Max(0f, top);
+        _pageMin[page] = Mathf.Max(0f, top + height - ViewportHeight);
+    }
+
+    /// <summary>只切可见性（不碰滚动位置）：翻页、或商店调价页追加新行时用。</summary>
+    private void ApplyVisibility()
+    {
+        for (var i = 0; i < _rows.Count; i++)
+        {
+            var row = _rows[i];
+
+            if (row.Rect != null)
+            {
+                row.Rect.gameObject.SetActive(row.Page == _page);
+            }
+        }
+    }
+
+    private void ApplyPage()
+    {
+        if (_pageCount == 0)
+        {
+            return;
+        }
+
+        ApplyVisibility();
+        _scroll = _pageMax[_page];
+        _content.anchoredPosition = new Vector2(0f, _scroll);
+
+        if (_pageTitle != null)
+        {
+            _pageTitle.text = $"{PageName(_page)} · 第 {_page + 1}/{_pageCount} 页";
+        }
+
+        Refresh();
+    }
+
+    private string PageName(int page)
+    {
+        foreach (var row in _rows)
+        {
+            if (row.Page == page && row.IsSection)
+            {
+                return row.Value.text;
+            }
+        }
+
+        return $"第 {page + 1} 页";
+    }
+
+    private void PagePrev()
+    {
+        if (_page <= 0)
+        {
+            return;
+        }
+
+        _page--;
+        CommitEditing();
+        _rebinding = null;
+        ApplyPage();
+    }
+
+    private void PageNext()
+    {
+        if (_page >= _pageCount - 1)
+        {
+            return;
+        }
+
+        _page++;
+        CommitEditing();
+        _rebinding = null;
+        ApplyPage();
+    }
+
     private void Apply(ConfigEntryBase entry, int direction)
     {
         // 共享代币只能在机场开关：进局之后想改就改不了了（避免半路把别人的池子改没）。
@@ -1098,6 +1333,10 @@ public sealed class HextechConfigPanel : MonoBehaviour
         // 混在配置项里会让人以为那也是几个开关。
         AppendReportRows();
         FlushLayout();
+
+        // 把所有行按分组编成几页，并切到第一页。
+        RecomputePages();
+        ApplyPage();
     }
 
     /// <summary>数值项（int / float / double）用输入框；开关、按键、单选列表仍然是点一下切换。</summary>
@@ -1477,6 +1716,11 @@ public sealed class HextechConfigPanel : MonoBehaviour
         if (appended)
         {
             FlushLayout();
+
+            // 价格页是动态长出来的（物品表扫出来才有一格格），每长出一段就重算分页 + 刷新可见性，
+            // 免得翻到这一页时新长出来的行还顶着「可见」的默认状态、或卡在别的页看不见。
+            RecomputePages();
+            ApplyVisibility();
         }
     }
 
@@ -1521,6 +1765,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
         _rows.Add(new Row
         {
             IsSection = true,
+            IsSubHeader = true,
             Rect = rect,
             Value = header,
             ValueBackground = null!,
@@ -1850,8 +2095,9 @@ public sealed class HextechConfigPanel : MonoBehaviour
         var height = Mathf.Max(0f, -_cursor - RowGap);
 
         _content.sizeDelta = new Vector2(0f, height);
-        _maxScroll = Mathf.Max(0f, height - ViewportHeight);
-        _scroll = Mathf.Clamp(_scroll, 0f, _maxScroll);
+
+        // 滚动范围按「当页」算（见 HandleScroll），这里只把内容高度落好、滚动归零。
+        _scroll = 0f;
         _content.anchoredPosition = new Vector2(0f, _scroll);
     }
 }

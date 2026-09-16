@@ -40,11 +40,25 @@ public sealed class UpdateInfo
 public static class UpdateFeed
 {
     /// <summary>
-    /// 内置更新源。真实地址不写进源码 —— 它由构建时注入的程序集元数据提供
-    /// （值来自本地被 gitignore 的 Config.Build.user.props，见 Directory.Build.props），
-    /// 玩家也可以在配置里覆盖。没注入时是空串，版本检查直接跳过，不影响正常游玩。
+    /// 兜底更新源。构建时若没注入 <c>HextechUpdateFeedUrl</c>（比如本地 dev 构建、或
+    /// <c>Config.Build.user.props</c> 没配），就用这个地址照常查版本 —— 免得版本检测因为
+    /// 「没注入地址」就整段静默跳过（玩家本地跑自己编的 dll 时收不到任何提示）。
+    /// 生产构建会通过程序集元数据注入同一个地址覆盖它，所以两者指向同一份 version.json。
     /// </summary>
-    public static string DefaultManifestUrl { get; } = ReadInjectedManifestUrl();
+    private const string FallbackManifestUrl = "http://175.178.43.129/version.json";
+
+    /// <summary>
+    /// 内置更新源。优先用构建时注入的程序集元数据（值来自被 gitignore 的 Config.Build.user.props，
+    /// 见 Directory.Build.props）；没注入就退回 <see cref="FallbackManifestUrl"/>，
+    /// 玩家也能在配置里用「更新源地址」覆盖。永远不会是空串，版本检查始终会跑。
+    /// </summary>
+    public static string DefaultManifestUrl { get; } = PickManifestUrl();
+
+    private static string PickManifestUrl()
+    {
+        var injected = ReadInjectedManifestUrl();
+        return injected.Length > 0 ? injected : FallbackManifestUrl;
+    }
 
     private static string ReadInjectedManifestUrl()
     {
