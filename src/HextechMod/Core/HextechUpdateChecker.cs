@@ -1,26 +1,21 @@
 using System;
 using System.Collections;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace PeakModder.HextechMod;
 
 /// <summary>
-/// 游戏刚打开时查一次版本，有新版本就把更新提示推出来。
+/// 游戏刚打开（插件一加载，此时正好在主菜单）就查一次版本，有新版本就把更新提示推出来。
 ///
-/// 时机刻意卡在「主菜单刚出来、玩家还没选在线还是单人」这一步，而不是进了对局才查：
-/// 那会儿玩家还没开始玩，打断一下不心疼，也不会跟登岛三选一抢屏幕。
+/// 不再等具体场景名：以前卡在「场景名 == Airport」才查，可机场就是主菜单，
+/// 一旦 PEAK 改了主菜单的场景名或加载时序，检测就整段失灵（玩家打开游戏也收不到提示）。
+/// 现在直接在插件启动后等菜单入场动画落定就查 —— 插件只在游戏启动时加载一次，
+/// 这一刻就是主菜单，等于「打开游戏就检测」，不用再进到机场。
 /// 只查一次（每次启动游戏算一次），失败就算了 —— 断网、服务器挂了都不该影响正常玩。
 /// </summary>
 public sealed class HextechUpdateChecker : MonoBehaviour
 {
-    /// <summary>主菜单场景，游戏启动后落在这里，玩家在这儿选在线 / 单人。</summary>
-    private const string MenuSceneName = "Airport";
-
-    /// <summary>等主菜单场景出现。实在等不到（场景改名之类）就走超时照查，别把更新提示卡没。</summary>
-    private const float MenuWaitTimeoutSeconds = 25f;
-
-    /// <summary>主菜单出来后再缓一下，让菜单自己的入场动画先落定，别两层动画叠在一起。</summary>
+    /// <summary>启动后缓一下，让主菜单自己的入场动画先落定，别两层动画叠在一起。</summary>
     private const float MenuSettleSeconds = 2f;
 
     private void Start()
@@ -33,13 +28,6 @@ public sealed class HextechUpdateChecker : MonoBehaviour
         if (!ModConfig.Enabled.Value || !ModConfig.CheckUpdateOnStart.Value)
         {
             yield break;
-        }
-
-        var deadline = Time.realtimeSinceStartup + MenuWaitTimeoutSeconds;
-
-        while (!IsAtMainMenu() && Time.realtimeSinceStartup < deadline)
-        {
-            yield return null;
         }
 
         yield return new WaitForSecondsRealtime(MenuSettleSeconds);
@@ -69,11 +57,5 @@ public sealed class HextechUpdateChecker : MonoBehaviour
 
         HextechPlugin.Log.LogInfo($"[更新] 发现新版本 v{info.Version}（当前 v{HextechPlugin.Version}）。");
         prompt.Show(info);
-    }
-
-    private static bool IsAtMainMenu()
-    {
-        var scene = SceneManager.GetActiveScene();
-        return scene.IsValid() && string.Equals(scene.name, MenuSceneName, StringComparison.OrdinalIgnoreCase);
     }
 }

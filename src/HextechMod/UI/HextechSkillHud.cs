@@ -26,7 +26,7 @@ public sealed class HextechSkillHud : MonoBehaviour
     private const float BottomOffset = 26f;
 
     private const float WalletWidth = 200f;
-    private const float WalletHeight = 76f;
+    private const float WalletHeight = 84f;
     private const float WalletGap = 18f;
 
     private static readonly Color DimIcon = new(1f, 1f, 1f, 0.35f);
@@ -95,16 +95,16 @@ public sealed class HextechSkillHud : MonoBehaviour
         _walletTop.rectTransform.anchorMin = new Vector2(0f, 1f);
         _walletTop.rectTransform.anchorMax = new Vector2(1f, 1f);
         _walletTop.rectTransform.pivot = new Vector2(0.5f, 1f);
-        _walletTop.rectTransform.offsetMin = new Vector2(10f, -WalletHeight + 6f);
-        _walletTop.rectTransform.offsetMax = new Vector2(-10f, -8f);
+        _walletTop.rectTransform.offsetMin = new Vector2(10f, -40f);
+        _walletTop.rectTransform.offsetMax = new Vector2(-10f, -10f);
 
         _walletShop = UiFactory.Label(_wallet.transform, string.Empty, 18f, TextAlignmentOptions.Center, UiFactory.TextMuted);
         _walletShop.textWrappingMode = TextWrappingModes.NoWrap;
         _walletShop.rectTransform.anchorMin = new Vector2(0f, 0f);
         _walletShop.rectTransform.anchorMax = new Vector2(1f, 0f);
         _walletShop.rectTransform.pivot = new Vector2(0.5f, 0f);
-        _walletShop.rectTransform.offsetMin = new Vector2(10f, 6f);
-        _walletShop.rectTransform.offsetMax = new Vector2(-10f, WalletHeight - 30f);
+        _walletShop.rectTransform.offsetMin = new Vector2(10f, 8f);
+        _walletShop.rectTransform.offsetMax = new Vector2(-10f, 36f);
     }
 
     private void Update()
