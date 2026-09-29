@@ -4,12 +4,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using BepInEx;
 using Photon.Pun;
 using UnityEngine;
-using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
 
 namespace PeakModder.HextechMod;
@@ -35,7 +35,7 @@ namespace PeakModder.HextechMod;
 /// </para>
 /// <para>
 /// 上传走<b>两条互不相同的通道</b>：先试 Mono 的 <c>HttpWebRequest</c>（托管实现、在后台线程上、关掉系统代理自动探测），
-/// 不成再换 Unity 自己的 <c>UnityWebRequest</c>。两条都超时的话，把报告落在 BepInEx 目录下让玩家手动发给作者 ——
+/// 不成再换 .NET 的 <c>HttpClient</c>。两条都超时的话，把报告落在 BepInEx 目录下让玩家手动发给作者 ——
 /// 「按了键一直停在正在上传」曾经就是卡在某一条通道上，玩家最后什么也拿不到，那是这个功能最难受的失败方式。
 /// </para>
 /// <para>
@@ -88,7 +88,6 @@ internal static class LogReporter
         "recovery", "warm_body", "full_belly", "clear_mind", "breathe",
         AdvancedHextechs.FiresideChatId,
         DefaultHextechs.ScavengerId,
-        DefaultHextechs.SnackId,
         DefaultHextechs.ToughBodyId,
         DefaultHextechs.GlassyId,
         DefaultHextechs.ThickHideId,
@@ -322,9 +321,9 @@ internal static class LogReporter
             var firstError = result.Error;
 
             progress?.Invoke("换一条通道再试…");
-            yield return SendViaUnity(url, payload, info, r => result = r, progress);
+            yield return SendViaHttpClient(url, payload, info, r => result = r, progress);
 
-            HextechPlugin.Log.LogInfo($"[上报] 通道二（UnityWebRequest）：{DescribeResult(result)}");
+            HextechPlugin.Log.LogInfo($"[上报] 通道二（HttpClient）：{DescribeResult(result)}");
 
             if (string.IsNullOrEmpty(result.Code))
             {
@@ -451,64 +450,68 @@ internal static class LogReporter
     }
 
     /// <summary>
-    /// 通道二：Unity 自己的 <c>UnityWebRequest</c>。
+    /// 通道二：.NET 的 <c>HttpClient</c>（后台线程上发）。
     /// <para>
-    /// 它以前是唯一的一条，出过「按了键就再也不回来」的事，所以这里除了它自己的 <c>timeout</c>
-    /// 还加了一圈按真实时间走的看门狗，到点直接 <c>Abort()</c> —— 不管底层怎么卡，
-    /// 玩家总能拿到一句话，而不是永远停在「正在上传」。
+    /// 原来这里用 Unity 的 <c>UnityWebRequest</c> —— 但 PEAK 打包时禁用了明文 HTTP，
+    /// 它对 <c>http://</c> 的请求会在 <c>SendWebRequest()</c> 里直接抛
+    /// <c>Insecure connection not allowed</c>（2026-09-16 实测）：协程当场炸掉、
+    /// <c>_busy</c> 再也回不到 false，表现成「按了键永远停在正在上传」。
+    /// 换成 HttpClient 后走 .NET 自己的网络栈，不受那条限制。
     /// </para>
     /// </summary>
-    private static IEnumerator SendViaUnity(string url, byte[] payload, string info, Action<SendResult> finished, Action<string>? progress)
+    private static IEnumerator SendViaHttpClient(string url, byte[] payload, string info, Action<SendResult> finished, Action<string>? progress)
     {
         var result = new SendResult();
 
-        using (var request = new UnityWebRequest(url, "POST"))
+        var worker = new Thread(() =>
         {
-            request.uploadHandler = new UploadHandlerRaw(payload);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.timeout = RequestTimeoutSeconds;
-
-            request.SetRequestHeader("Content-Type", "application/octet-stream");
-            request.SetRequestHeader("Content-Encoding", "gzip");
-            request.SetRequestHeader("X-Hextech-Info", info);
-
-            var operation = request.SendWebRequest();
-            var startedAt = Time.realtimeSinceStartup;
-
-            while (!operation.isDone && Time.realtimeSinceStartup - startedAt < RequestTimeoutSeconds + 5f)
+            try
             {
-                progress?.Invoke($"正在上传日志… 已等 {Time.realtimeSinceStartup - startedAt:0} 秒");
-                yield return new WaitForSecondsRealtime(1f);
-            }
-
-            if (!operation.isDone)
-            {
-                request.Abort();
-                result.Error = $"请求超时（超过 {RequestTimeoutSeconds} 秒没回应）";
-                result.Done = true;
-                finished(result);
-                yield break;
-            }
-
-            // 失败时服务器也会回一小段 JSON（{"ok":false,"error":"…"}），能读到就用它当提示。
-            var body = request.downloadHandler?.text ?? string.Empty;
-
-            if (request.result == UnityWebRequest.Result.Success)
-            {
-                result.Code = ReadJsonString(body, "code");
-
-                if (string.IsNullOrEmpty(result.Code))
+                using var client = new HttpClient
                 {
-                    result.Error = "服务器没返回编号";
+                    Timeout = TimeSpan.FromSeconds(RequestTimeoutSeconds),
+                };
+
+                using var content = new ByteArrayContent(payload);
+                content.Headers.TryAddWithoutValidation("Content-Type", "application/octet-stream");
+                content.Headers.TryAddWithoutValidation("Content-Encoding", "gzip");
+                content.Headers.TryAddWithoutValidation("X-Hextech-Info", info);
+
+                using var response = client.PostAsync(url, content).GetAwaiter().GetResult();
+                var text = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+
+                // 失败时服务器也会回一小段 JSON（{"ok":false,"error":"…"}），能读到就用它当提示。
+                if (response.IsSuccessStatusCode)
+                {
+                    result.Code = ReadJsonString(text, "code");
+
+                    if (string.IsNullOrEmpty(result.Code))
+                    {
+                        result.Error = "服务器没返回编号";
+                    }
+                }
+                else
+                {
+                    result.Error = ReadJsonString(text, "error") ?? $"HTTP {(int)response.StatusCode}";
                 }
             }
-            else
+            catch (Exception exception)
             {
-                result.Error = ReadJsonString(body, "error") ?? request.error;
+                result.Error = exception.Message;
             }
+            finally
+            {
+                result.Done = true;
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "HextechModReportAlt",
+        };
 
-            result.Done = true;
-        }
+        worker.Start();
+
+        yield return WaitFor(result, progress);
 
         finished(result);
     }
@@ -531,7 +534,7 @@ internal static class LogReporter
         if (!result.Done)
         {
             // 先写内容、后立 Done：Done 是 volatile，写它之后上面这一句别的主线程才一定看得见。
-            result.Error = $"请求超时（超过 {deadline:0} 秒没回应）";
+            result.Error = Localization.T("请求超时（超过 {0:0} 秒没回应）", deadline);
             result.Done = true;
         }
     }
@@ -685,6 +688,42 @@ internal static class LogReporter
             + $"完全昏迷={local.data.fullyPassedOut} 半昏迷={local.data.passedOut} "
             + $"被扛着={local.data.isCarried} 扛着={(carried == null ? "无" : carried.characterName)}");
 
+        // 攀爬体检（814273「爬不了墙」排查）：模组会动攀爬数值的词条都乘在 climbSpeed / maxStaminaUsage 上，
+        // 玩家再反馈爬墙问题时，这份原始数值一眼能看出是速度没了 / 耐耗爆了 / 体力见底哪一种。
+        // 玩家应该在**问题正发生时**按 F10，这份快照才是当时的。
+        var climbing = local.refs != null ? local.refs.climbing : null;
+
+        if (climbing != null)
+        {
+            builder.AppendLine(
+                $"攀爬体检 : climbSpeed={climbing.climbSpeed:0.00} climbSpeedMod={climbing.climbSpeedMod:0.00} "
+                + $"maxStaminaUsage={climbing.maxStaminaUsage:0.000} minStaminaUsage={climbing.minStaminaUsage:0.000} "
+                + $"体力={local.data.lastFrameTotalStamina:0.00} 额外体力={local.data.extraStamina:0.0} "
+                + $"爬墙时缺体力累计={local.data.outOfStaminaClimbingFor:0.0}s "
+                + $"体力系数={local.data.staminaMod:0.00}");
+        }
+        else
+        {
+            builder.AppendLine("攀爬体检 : (本地角色上没有 CharacterClimbing 组件)");
+        }
+
+        // 状态条原样入报告（点数口径，×100）。旧版报告的「当前」那行其实是**选中的技能**，
+        // 状态数值从来没进过报告 ——「爬不了墙」查了一晚上才发现伤势这个头号嫌疑根本看不见。
+        // 伤势直接顶掉体力上限（PEAK 核心机制），是「能抓墙却只能左右挪」的头号解释。
+        var afflictions = local.refs != null ? local.refs.afflictions : null;
+
+        if (afflictions != null)
+        {
+            builder.AppendLine(
+                $"状态条 : 伤势={afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Injury) * 100f:0.#}"
+                + $" 饥饿={afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Hunger) * 100f:0.#}"
+                + $" 中毒={afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Poison) * 100f:0.#}"
+                + $" 寒冷={afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Cold) * 100f:0.#}"
+                + $" 睡眠={afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Drowsy) * 100f:0.#}"
+                + $" 诅咒={afflictions.GetCurrentStatus(CharacterAfflictions.STATUSTYPE.Curse) * 100f:0.#}"
+                + $" 石化={afflictions.currentPetrify:0.#}");
+        }
+
         var state = HextechState.Get(local);
 
         if (state == null)
@@ -694,8 +733,7 @@ internal static class LogReporter
         }
 
         builder.AppendLine(
-            $"海克斯   : 能量={state.Energy:0.#}/{HextechState.MaxEnergy:0.#} "
-            + $"代币={HextechState.FormatTokens(state.Tokens)} 复活次数={state.ReviveCharges}");
+            $"海克斯   : 代币={HextechState.FormatTokens(state.Tokens)} 复活次数={state.ReviveCharges}");
 
         var owned = new List<string>();
 
@@ -795,8 +833,7 @@ internal static class LogReporter
             }
 
             builder.AppendLine(
-                $"    能量={state.Energy:0.#}/{HextechState.MaxEnergy:0.#} "
-                + $"代币={HextechState.FormatTokens(state.Tokens)} 复活次数={state.ReviveCharges}");
+                $"    代币={HextechState.FormatTokens(state.Tokens)} 复活次数={state.ReviveCharges}");
             builder.AppendLine($"    词条 : {(owned.Count == 0 ? "(无)" : string.Join(" ", owned))}");
         }
     }
@@ -1037,6 +1074,15 @@ internal static class LogReporter
             var end = info.Length;
             var windowStart = WindowStartBytes(unityLog, end);
             var from = Math.Max(windowStart, end - maxBytes);
+
+            // 窗口内没有「新内容」时（日志在十分钟里没涨，或文件被截过），上面的窗口会退化成
+            // from == end → 抓到 0 字节，刚好把模组自己的报错（生成物资失败 / 扫描物资池失败 / 商店错误）
+            // 整个吞掉。这种稳定不动的日志往往才是定位 bug 的关键，退回抓最后 maxBytes 一截兜底。
+            if (from >= end)
+            {
+                from = Math.Max(0, end - maxBytes);
+            }
+
             var take = (int)Math.Min(end - from, int.MaxValue);
 
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))

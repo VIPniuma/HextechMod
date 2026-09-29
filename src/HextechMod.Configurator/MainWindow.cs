@@ -17,8 +17,8 @@ namespace PeakModder.HextechConfigurator;
 /// <summary>主窗口骨架：数值表与视图切换。卡片墙见 Views，服务器交互见 Server。</summary>
 internal sealed partial class MainWindow : Window
 {
-    private const string ServerUrl = "http://175.178.43.129/balance.json";
-    private const string ScpTarget = "root@175.178.43.129:/www/wwwroot/hextech/balance.json";
+    private const string ServerUrl = "http://<你的服务器>/balance.json";
+    private const string ScpTarget = "<用户名>@<你的服务器>:/你的站点目录/balance.json";
 
     private static readonly string KeyPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "hextech_publish");

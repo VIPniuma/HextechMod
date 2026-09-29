@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -5,27 +7,39 @@ using UnityEngine.UI;
 namespace PeakModder.HextechMod;
 
 /// <summary>
-/// 「发现新版本」提示框：显示版本号 + 更新公告，并指路到安装器。
-///
-/// 不做进程内自动更新是刻意的：插件 dll 正被游戏加载着，文件锁死、进程里也换不掉自己。
-/// 唯一可行的玩法是「先把新版下到旁边，等游戏退出再替换」，绕一大圈还不一定成功 ——
-/// 游戏装在 Program Files 下要有管理员权限才写得动，静默替换游戏目录里的 dll 容易被杀软拦，
-/// 替换失败还会留下半新半旧的 dll。安装器干同一件事稳得多（游戏关着、内置模组本体、
-/// 顺带把 BepInEx 框架补齐），所以这里只负责提醒一声，并说清楚去哪更新。
+/// 「发现新版本」提示框：显示版本号 + 更新公告，三颗按钮 —— 忽略此版本 / 立即更新 / 关闭。
+/// <para>
+/// 「立即更新」走游戏内自更新：下载新版 dll、按清单校验 SHA256，写到当前 dll 旁边，
+/// 拉起一个等游戏退出的替换脚本（见 <see cref="HextechSelfUpdater"/>），然后自动退出游戏 ——
+/// 脚本会原地换上新 dll 并把游戏重新打开。下载中允许「关闭」取消；一旦替换脚本就绪，
+/// 弹窗就进入「即将退出重启」的终态，谁也关不掉，几秒后游戏自动退出重启。
+/// </para>
 /// </summary>
 public sealed class HextechUpdatePrompt : MonoBehaviour
 {
+    private enum UpdateState
+    {
+        /// <summary>还没开始更新：三颗按钮各在其位。</summary>
+        Idle,
+
+        /// <summary>正在下载新版 dll：「关闭」变成取消，其余按钮禁用。</summary>
+        Downloading,
+
+        /// <summary>替换脚本已就绪：游戏即将自动退出重启，弹窗锁死不再响应任何输入。</summary>
+        Ready,
+    }
+
     private const float CardWidth = 840f;
     private const float CardHeight = 580f;
     private const float ButtonWidth = 226f;
     private const float ButtonHeight = 62f;
     private const float ButtonGap = 22f;
 
-    /// <summary>安装器 exe 的文件名，指路文案里要用。改文件名记得一并改这里。</summary>
-    private const string InstallerFileName = "HextechModInstaller.exe";
+    /// <summary>没在更新时状态行显示的说明。</summary>
+    private const string IdleStatusText =
+        "点「立即更新」自动完成：下载新版 → 自动退出游戏 → 替换并重新打开。下载中点「关闭」可取消。";
 
-    /// <summary>按钮文案。「立即更新」已经拿掉 —— 更新只能去安装器做，这里不提供入口。</summary>
-    private static readonly string[] ButtonLabels = { "忽略此版本", "稍后再说" };
+    private static readonly string[] ButtonLabels = { "忽略此版本", "立即更新", "关闭" };
 
     private sealed class ButtonView
     {
@@ -43,13 +57,17 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
     private TextMeshProUGUI _versionLine = null!;
     private TextMeshProUGUI _notesHeading = null!;
     private TextMeshProUGUI _notes = null!;
-    private TextMeshProUGUI _guide = null!;
+    private TextMeshProUGUI _status = null!;
+    private Image _progressTrack = null!;
+    private Image _progressFill = null!;
 
     private readonly ButtonView[] _buttons = new ButtonView[ButtonLabels.Length];
 
     private UpdateInfo? _info;
     private int _hover = -1;
     private bool _visible;
+    private UpdateState _state = UpdateState.Idle;
+    private Coroutine? _downloading;
 
     public bool IsOpen => _visible;
 
@@ -136,21 +154,38 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
         _notes.fontSizeMin = 15f;
         _notes.fontSizeMax = 24f;
 
-        // 「去哪更新」这行一直看得见 —— 它是玩家唯一能走的路，不再像以前那样被拿去显示下载进度。
-        // 文案是两行，所以这块按两行 22pt 的高度留（按钮顶边在 88，公告底边在 152，这里占 90~146）。
-        _guide = UiFactory.Label(card, string.Empty, 22f, TextAlignmentOptions.Center, UiFactory.Accent);
-        _guide.rectTransform.anchorMin = new Vector2(0f, 0f);
-        _guide.rectTransform.anchorMax = new Vector2(1f, 0f);
-        _guide.rectTransform.pivot = new Vector2(0.5f, 0f);
-        _guide.rectTransform.offsetMin = new Vector2(40f, 90f);
-        _guide.rectTransform.offsetMax = new Vector2(-40f, 146f);
+        // 进度条（平时藏着，点「立即更新」才现身）+ 状态行：游戏内更新的全部反馈都在这一小块。
+        _progressTrack = UiFactory.Rounded(card, UiFactory.PanelBackgroundLight, 6);
+        _progressTrack.rectTransform.anchorMin = new Vector2(0f, 1f);
+        _progressTrack.rectTransform.anchorMax = new Vector2(1f, 1f);
+        _progressTrack.rectTransform.pivot = new Vector2(0.5f, 1f);
+        _progressTrack.rectTransform.offsetMin = new Vector2(56f, -(CardHeight - 110f));
+        _progressTrack.rectTransform.offsetMax = new Vector2(-56f, -(CardHeight - 94f));
+
+        _progressFill = UiFactory.Rounded(_progressTrack.rectTransform, UiFactory.Accent, 6);
+        var fillRect = _progressFill.rectTransform;
+        fillRect.anchorMin = new Vector2(0f, 0f);
+        fillRect.anchorMax = new Vector2(0f, 1f);
+        fillRect.pivot = new Vector2(0f, 0.5f);
+        fillRect.offsetMin = new Vector2(0f, 0f);
+        fillRect.offsetMax = new Vector2(0f, 0f);
+
+        _status = UiFactory.Label(card, string.Empty, 20f, TextAlignmentOptions.Center, UiFactory.TextMuted);
+        _status.rectTransform.anchorMin = new Vector2(0f, 1f);
+        _status.rectTransform.anchorMax = new Vector2(1f, 1f);
+        _status.rectTransform.pivot = new Vector2(0.5f, 1f);
+        _status.rectTransform.offsetMin = new Vector2(40f, -(CardHeight - 146f));
+        _status.rectTransform.offsetMax = new Vector2(-40f, -(CardHeight - 118f));
+        _status.enableAutoSizing = true;
+        _status.fontSizeMin = 15f;
+        _status.fontSizeMax = 20f;
 
         var totalWidth = (ButtonLabels.Length * ButtonWidth) + ((ButtonLabels.Length - 1) * ButtonGap);
         var startX = (-totalWidth / 2f) + (ButtonWidth / 2f);
 
-        // 配色跟着语义走：没有「立即更新」之后，主推的动作是「稍后再说」（先关掉弹窗、玩家自己去更新），
-        // 所以只有它用高亮色；「忽略此版本」是次要且带破坏性的选择，用普通底色，免得看起来像推荐操作。
-        var colors = new[] { UiFactory.PanelBackgroundLight, UiFactory.PanelHighlight };
+        // 配色跟着语义走：「立即更新」是主推动作用高亮色；「忽略此版本」带破坏性（这版再也不提示）、
+        // 「关闭」是中性动作，都用普通底色，免得看起来像推荐操作。
+        var colors = new[] { UiFactory.PanelBackgroundLight, UiFactory.Accent, UiFactory.PanelBackgroundLight };
 
         for (var i = 0; i < ButtonLabels.Length; i++)
         {
@@ -197,20 +232,17 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
 
         _info = info;
         _hover = -1;
+        _state = UpdateState.Idle;
 
-        _title.text = info.Force ? "发现新版本（建议更新）" : "发现新版本";
-        _versionLine.text = $"当前 v{HextechPlugin.Version}  →  最新 v{info.Version}"
-                            + (string.IsNullOrWhiteSpace(info.Published) ? string.Empty : $"　·　{info.Published}");
+        _title.text = Localization.T(info.Force ? "发现新版本（建议更新）" : "发现新版本");
+        _versionLine.text = Localization.T("当前 v{0} → 最新 v{1}", HextechPlugin.Version, info.Version)
+                            + (string.IsNullOrWhiteSpace(info.Published) ? string.Empty : $" · {info.Published}");
         _notes.text = string.IsNullOrWhiteSpace(info.Notes)
             ? "（这次的更新公告是空的，具体改动见发布页。）"
             : info.Notes;
+        _status.text = IdleStatusText;
 
-        // 这里原来打的是完整的更新源地址。玩家看到自己的服务器地址没有任何用处，
-        // 反而等于把地址摆在界面上，所以不再显示。
-        _guide.text =
-            $"更新方法：退出游戏，运行安装器 {InstallerFileName}\n"
-            + "选中同一个游戏目录，选「一键安装」即可";
-
+        HideProgress();
         RefreshVisuals();
 
         _canvas.enabled = true;
@@ -227,9 +259,22 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
             return;
         }
 
+        // 就绪态不可关：替换脚本已经在等游戏退出，这会儿关掉弹窗没有任何意义。
+        if (_state == UpdateState.Ready)
+        {
+            return;
+        }
+
+        if (_downloading != null)
+        {
+            StopCoroutine(_downloading);
+            _downloading = null;
+        }
+
         _canvas.enabled = false;
         _visible = false;
         _info = null;
+        _state = UpdateState.Idle;
 
         HextechWindowHost.Sync();
     }
@@ -241,13 +286,34 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
             return;
         }
 
-        if (!HextechWindowHost.IsOpen || Input.GetKeyDown(KeyCode.Escape))
+        // 就绪态：弹窗锁死，输入全忽略，等协程把游戏退出去（脚本接管重启）。
+        if (_state == UpdateState.Ready)
+        {
+            _group.alpha = Mathf.MoveTowards(_group.alpha, 1f, Time.deltaTime * 8f);
+            return;
+        }
+
+        if (!HextechWindowHost.IsOpen)
         {
             Hide();
             return;
         }
 
         _group.alpha = Mathf.MoveTowards(_group.alpha, 1f, Time.deltaTime * 8f);
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (_state == UpdateState.Downloading)
+            {
+                CancelDownload();
+            }
+            else
+            {
+                Hide();
+            }
+
+            return;
+        }
 
         var mouse = (Vector2)Input.mousePosition;
         _hover = -1;
@@ -267,14 +333,26 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
             return;
         }
 
-        if (_hover == 0)
+        switch (_hover)
         {
-            IgnoreVersion();
-            return;
-        }
+            case 0:
+                IgnoreVersion();
+                break;
+            case 1:
+                BeginUpdate();
+                break;
+            case 2:
+                if (_state == UpdateState.Downloading)
+                {
+                    CancelDownload();
+                }
+                else
+                {
+                    Hide();
+                }
 
-        HextechHud.Toast("已跳过 · 下次进游戏还会提醒");
-        Hide();
+                break;
+        }
     }
 
     private void RefreshVisuals()
@@ -288,28 +366,116 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
                 continue;
             }
 
-            // 强制更新时「忽略此版本」不给点（点了也没意义）；「稍后再说」永远可以关掉弹窗 ——
-            // 游戏里本来也更新不了，把人锁在弹窗上毫无用处。
-            var disabled = i == 0 && _info != null && _info.Force;
+            // 下载中只留「关闭」当取消用；就绪后全部锁死；平时只有强制更新会让「忽略」不可点。
+            var disabled = _state switch
+            {
+                UpdateState.Downloading => i != 2,
+                UpdateState.Ready => true,
+                _ => i == 0 && _info != null && _info.Force,
+            };
+
+            // 强制更新时把主按钮的文案说重一点：这版忽略不掉，只能更。
+            var labelOverride = i == 1 && _info != null && _info.Force ? "必须更新" : null;
 
             if (disabled)
             {
                 button.Background.color = UiFactory.PanelBackground;
                 button.Label.color = UiFactory.TextMuted;
-                continue;
+            }
+            else
+            {
+                button.Background.color = i == _hover
+                    ? Color.Lerp(button.BaseColor, Color.white, 0.25f)
+                    : button.BaseColor;
+                button.Label.color = i == 1 ? UiFactory.PanelBackground : UiFactory.TextPrimary;
             }
 
-            button.Background.color = i == _hover
-                ? Color.Lerp(button.BaseColor, UiFactory.Accent, 0.45f)
-                : button.BaseColor;
-            button.Label.color = UiFactory.TextPrimary;
+            button.Label.text = labelOverride ?? ButtonLabels[i];
+        }
+    }
+
+    private void BeginUpdate()
+    {
+        if (_state != UpdateState.Idle || _info == null)
+        {
+            return;
         }
 
-        // 强制更新时「忽略」没意义，直接把文案说清楚。
-        if (_buttons[0] != null)
+        _state = UpdateState.Downloading;
+        SetProgress(0f);
+        _status.text = Localization.T("正在下载新版本…");
+        RefreshVisuals();
+
+        _downloading = StartCoroutine(DownloadRoutine(_info));
+    }
+
+    private IEnumerator DownloadRoutine(UpdateInfo info)
+    {
+        byte[]? data = null;
+
+        yield return UpdateFeed.DownloadDll(info, SetProgress, result => data = result);
+
+        _downloading = null;
+
+        // 下载途中弹窗被关掉（取消更新）了：别再往下走。
+        if (_state != UpdateState.Downloading)
         {
-            _buttons[0].Label.text = _info != null && _info.Force ? "必须更新" : ButtonLabels[0];
+            yield break;
         }
+
+        if (data == null)
+        {
+            Fail("更新失败：下载没成功（断网或服务器没响应），游戏保持原样。");
+            yield break;
+        }
+
+        _status.text = Localization.T("下载完成，正在准备替换…");
+
+        if (!HextechSelfUpdater.StageAndArm(data, out var error))
+        {
+            Fail($"更新失败：{error}。可以关掉游戏后用安装器更新。");
+            yield break;
+        }
+
+        _state = UpdateState.Ready;
+        SetProgress(1f);
+        _status.text = Localization.T("v{0} 已就绪 · 游戏即将退出并自动重启；若没有自动重开，手动启动即可（更新已完成）", info.Version);
+
+        HextechPlugin.Log.LogInfo($"[更新] v{info.Version} 替换脚本已就绪，游戏即将退出并自动重启。");
+
+        RefreshVisuals();
+
+        yield return new WaitForSecondsRealtime(1.6f);
+        Application.Quit();
+    }
+
+    private void CancelDownload()
+    {
+        if (_downloading != null)
+        {
+            StopCoroutine(_downloading);
+            _downloading = null;
+        }
+
+        _state = UpdateState.Idle;
+        HideProgress();
+        _status.text = Localization.T("已取消更新，可以继续游戏");
+        RefreshVisuals();
+
+        HextechHud.Toast("已取消更新，可以继续游戏");
+    }
+
+    /// <summary>更新流程走到死路时回到初始态：按钮恢复、进度条藏起来、状态行说明原因
+    /// （Toast 的画布层级在这层弹窗下面，会被盖住，所以失败原因必须写进状态行）。</summary>
+    private void Fail(string message)
+    {
+        _state = UpdateState.Idle;
+        HideProgress();
+        _status.text = message;
+        RefreshVisuals();
+
+        HextechPlugin.Log.LogWarning($"[更新] {message}");
+        HextechHud.Toast(message);
     }
 
     private void IgnoreVersion()
@@ -320,7 +486,33 @@ public sealed class HextechUpdatePrompt : MonoBehaviour
         }
 
         ModConfig.IgnoredUpdateVersion.Value = _info.Version;
-        HextechHud.Toast($"已忽略 v{_info.Version} · 想更新的话清掉配置里的「更新.已忽略版本」");
+        HextechHud.Toast(Localization.T("已忽略 v{0} · 想更新的话清掉配置里的「更新.已忽略版本」", _info.Version));
         Hide();
+    }
+
+    private void SetProgress(float value)
+    {
+        if (_progressTrack == null)
+        {
+            return;
+        }
+
+        if (!_progressTrack.enabled)
+        {
+            _progressTrack.enabled = true;
+            _progressFill.enabled = true;
+        }
+
+        var width = _progressTrack.rectTransform.rect.width;
+        _progressFill.rectTransform.offsetMax = new Vector2(width * Mathf.Clamp01(value), 0f);
+    }
+
+    private void HideProgress()
+    {
+        if (_progressTrack != null && _progressTrack.enabled)
+        {
+            _progressTrack.enabled = false;
+            _progressFill.enabled = false;
+        }
     }
 }

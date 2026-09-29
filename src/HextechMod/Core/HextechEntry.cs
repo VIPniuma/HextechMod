@@ -153,15 +153,16 @@ public abstract class HextechEntry
 public sealed class HextechDrawback
 {
     private readonly Action<HextechState, int> _apply;
+    private readonly string _description;
 
     public HextechDrawback(string description, Action<HextechState, int> apply)
     {
-        Description = description;
+        _description = description;
         _apply = apply;
     }
 
     /// <summary>「代价：」后面的那句话。</summary>
-    public string Description { get; }
+    public string Description => Localization.T(_description);
 
     public void Apply(HextechState state, int stacks)
     {
@@ -210,7 +211,7 @@ internal sealed class ActionHextech : HextechEntry
 
     public override string Id => _id;
 
-    public override string Title => _title;
+    public override string Title => Localization.T(_title);
 
     public override HextechQuality Quality { get; }
 
@@ -257,13 +258,13 @@ internal sealed class ActionHextech : HextechEntry
     private string Describe(int stacks)
     {
         var value = Quality.TotalValue(stacks) * 100f;
-        var text = string.Format(_description, $"{value:0.##}%");
+        var text = string.Format(Localization.HextechDescription(_title, _description), $"{value:0.##}%");
 
         if (Drawback == null)
         {
             return text;
         }
 
-        return $"{text} <color=#{ColorUtility.ToHtmlStringRGB(UiFactory.Danger)}>代价：{Drawback.Description}</color>";
+        return $"{text} <color=#{ColorUtility.ToHtmlStringRGB(UiFactory.Danger)}>{Localization.T("代价：")}{Drawback.Description}</color>";
     }
 }

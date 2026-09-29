@@ -817,7 +817,7 @@ internal static class AdvancedHextechs
             (state, _) =>
             {
                 state.GrantReviveCharge();
-                HextechHud.Toast($"死而复生：获得 1 次复活机会 · 按 {ModConfig.ResurrectKey.Value} 复活队友");
+                HextechHud.Toast(Localization.T("死而复生：获得 1 次复活机会 · 按 {0} 复活队友", ModConfig.ResurrectKey.Value));
             }));
     }
 

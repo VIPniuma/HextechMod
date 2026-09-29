@@ -58,7 +58,7 @@ internal sealed class RollShow
 /// CS2 开箱那种横向滚动抽奖：轨道高速掠过、缓慢减速停在中间指针处，
 /// 然后高亮结果。<para>
 /// 结果在调用方那边早就结算完了，这里纯粹是演出，所以联机时不会因为动画而不同步。
-/// 播放期间按 空格 / 回车 / 鼠标左键 可以跳过。
+/// 播放期间按任意键（含鼠标）都可以跳过。
 /// </para>
 /// </summary>
 internal sealed class HextechRoll : MonoBehaviour
@@ -72,11 +72,11 @@ internal sealed class HextechRoll : MonoBehaviour
     private const float SlotHeight = 176f;
     private const float SlotGap = 16f;
 
-    // 总时长从 5.4 秒一路压到现在的 2.6 秒左右：一次三连礼包要连着播 3 遍，
-    // 滚动条再慢慢转下去就只剩烦了。
-    private const float SpinSeconds = 1.5f;
-    private const float SettleSeconds = 0.28f;
-    private const float HoldSeconds = 0.85f;
+    // 总时长从 5.4 秒一路压下来：一次三连礼包要连着播 3 遍，滚动条再慢慢转下去就只剩烦了。
+    // 2026-09-20 再压一档（玩家反馈抽奖期间僵直不能动）：现在一次约 1.8 秒，而且任意键都能跳。
+    private const float SpinSeconds = 1.1f;
+    private const float SettleSeconds = 0.2f;
+    private const float HoldSeconds = 0.5f;
 
     private enum Phase
     {
@@ -227,7 +227,7 @@ internal sealed class HextechRoll : MonoBehaviour
 
         var hint = UiFactory.Label(
             root,
-            "空格 / 回车 / 鼠标左键 跳过",
+            "任意按键跳过",
             20f,
             TextAlignmentOptions.Center,
             new Color(UiFactory.TextMuted.r, UiFactory.TextMuted.g, UiFactory.TextMuted.b, 0.75f));
@@ -402,7 +402,7 @@ internal sealed class HextechRoll : MonoBehaviour
         _elapsed = 0f;
 
         // 触发抽奖的那一次点击不要立刻把动画跳过。
-        _inputBlockedUntil = Time.time + 0.25f;
+        _inputBlockedUntil = Time.time + 0.1f;
     }
 
     private void Update()
@@ -478,10 +478,9 @@ internal sealed class HextechRoll : MonoBehaviour
 
     private static bool SkipPressed()
     {
-        return Input.GetMouseButtonDown(0)
-               || Input.GetKeyDown(KeyCode.Space)
-               || Input.GetKeyDown(KeyCode.Return)
-               || Input.GetKeyDown(KeyCode.KeypadEnter);
+        // 任意键（含鼠标键）都能跳 —— 抽奖只是演出，结果早就结算完了，
+        // 没必要让玩家必须去够空格 / 回车（2026-09-20 玩家反馈：抽奖时僵直不能动，越快能跳越好）。
+        return Input.anyKeyDown;
     }
 
     private void FillSlots(RollShow show)

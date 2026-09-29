@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -8,35 +9,35 @@ using System.Windows.Media;
 namespace PeakModder.HextechInstaller;
 
 /// <summary>
-/// 磨砂白浅色主题（2026-09-14 用户要求：半透明磨砂白 + 浅色界面）。
+/// 深色主题（2026-09-14 先做了浅色，2026-09-19 用户要求改回深色）。
 /// 真正的「磨砂」由 <see cref="Frost.EnableAcrylic(System.Windows.Window)"/> 在窗口句柄上
-/// 开启系统的亚克力模糊；这里只提供叠在上面的半透明白色底色与浅色控件。
+/// 开启系统的深色亚克力模糊；这里提供叠在上面的半透明暗蓝灰底色与浅色控件。
 /// <para>
-/// ⚠️ 旧版是照 mod 的深色面板抄的，这次整体换成浅色 —— 颜色名没改
-/// （PanelBackground 之类沿用），但语义从「深棕」变成了「半透明白」。
+/// 颜色名沿用浅色时代的命名（PanelBackground 之类没改），但语义现在是「暗蓝灰半透明」。
+/// 所有界面都引用 Theme.*，换肤只动这一处。
 /// </para>
 /// </summary>
 internal static class Theme
 {
-    // ── 面板底色（全部带 alpha，叠在系统磨砂上）────────────────
-    public static readonly SolidColorBrush PanelBackground = Frozen("#C8F7F9FC");
-    public static readonly SolidColorBrush PanelBackgroundLight = Frozen("#D9FFFFFF");
-    public static readonly SolidColorBrush PanelHighlight = Frozen("#F2FFFFFF");
-    public static readonly SolidColorBrush HeaderBackground = Frozen("#B3FFFFFF");
-    public static readonly SolidColorBrush SidebarBackground = Frozen("#A6FFFFFF");
-    public static readonly SolidColorBrush InsetBackground = Frozen("#E6F3F6FB");
-    public static readonly SolidColorBrush Divider = Frozen("#FFE1E6EE");
-    public static readonly SolidColorBrush Outline = Frozen("#FFD5DCE6");
+    // ── 面板底色（全部带 alpha，叠在系统磨砂上；深色主题：暗蓝灰半透明）────────────────
+    public static readonly SolidColorBrush PanelBackground = Frozen("#C81E222B");
+    public static readonly SolidColorBrush PanelBackgroundLight = Frozen("#E2242933");
+    public static readonly SolidColorBrush PanelHighlight = Frozen("#E22C3340");
+    public static readonly SolidColorBrush HeaderBackground = Frozen("#B31E222B");
+    public static readonly SolidColorBrush SidebarBackground = Frozen("#A61A1E26");
+    public static readonly SolidColorBrush InsetBackground = Frozen("#661A1E26");
+    public static readonly SolidColorBrush Divider = Frozen("#FF2E3540");
+    public static readonly SolidColorBrush Outline = Frozen("#FF3A4250");
 
-    // ── 文字与强调色 ──────────────────────────────────────────
-    public static readonly SolidColorBrush TextPrimary = Frozen("#FF1A2233");
-    public static readonly SolidColorBrush TextMuted = Frozen("#FF525E6E");
-    public static readonly SolidColorBrush TextDim = Frozen("#FF8B95A3");
+    // ── 文字与强调色（深色主题：浅色字）─────────────────────────────────────────
+    public static readonly SolidColorBrush TextPrimary = Frozen("#FFF2F5FA");
+    public static readonly SolidColorBrush TextMuted = Frozen("#FFAEB6C2");
+    public static readonly SolidColorBrush TextDim = Frozen("#FF7A828F");
     public static readonly SolidColorBrush Accent = Frozen("#FFD97706");
     public static readonly SolidColorBrush AccentHover = Frozen("#FFF59E0B");
-    public static readonly SolidColorBrush Success = Frozen("#FF1F9D55");
-    public static readonly SolidColorBrush Warning = Frozen("#FFB45309");
-    public static readonly SolidColorBrush Danger = Frozen("#FFD64545");
+    public static readonly SolidColorBrush Success = Frozen("#FF3DDC8C");
+    public static readonly SolidColorBrush Warning = Frozen("#FFE0902B");
+    public static readonly SolidColorBrush Danger = Frozen("#FFF06A6A");
 
     public static readonly FontFamily Font = new("Microsoft YaHei UI, Microsoft YaHei, Segoe UI");
 
@@ -45,7 +46,7 @@ internal static class Theme
         " xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'" +
         " xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>" +
         "  <Border x:Name='Root' CornerRadius='16' Background='{TemplateBinding Background}' Padding='24,0'" +
-        "          BorderBrush='#14000000' BorderThickness='0,0,0,1'>" +
+        "          BorderBrush='#14FFFFFF' BorderThickness='0,0,0,1'>" +
         "    <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'" +
         "                      TextElement.Foreground='{TemplateBinding Foreground}' />" +
         "  </Border>" +
@@ -68,7 +69,7 @@ internal static class Theme
         " xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>" +
         "  <StackPanel Orientation='Horizontal' Background='Transparent'>" +
         "    <Border x:Name='Box' Width='17' Height='17' CornerRadius='8'" +
-        "            Background='#66FFFFFF' BorderBrush='#FFB9C2CF' BorderThickness='1'" +
+        "            Background='#402C3340' BorderBrush='#FF5A6373' BorderThickness='1'" +
         "            VerticalAlignment='Center'>" +
         "      <Path x:Name='Tick' Data='M 0,5 L 4.5,9.5 L 11.5,1.5' Stroke='#FFD97706' StrokeThickness='2.2'" +
         "            StrokeStartLineCap='Round' StrokeEndLineCap='Round' Visibility='Collapsed'" +
@@ -112,7 +113,7 @@ internal static class Theme
         "              <Thumb>" +
         "                <Thumb.Template>" +
         "                  <ControlTemplate TargetType='Thumb'>" +
-        "                    <Border Background='#FFC2CAD6' CornerRadius='4' Margin='1,2' />" +
+        "                    <Border Background='#FF616B7A' CornerRadius='4' Margin='1,2' />" +
         "                  </ControlTemplate>" +
         "                </Thumb.Template>" +
         "              </Thumb>" +
@@ -177,7 +178,7 @@ internal static class Theme
     {
         return new TextBlock
         {
-            Text = text,
+            Text = InstallerLocalization.T(text),
             FontFamily = Font,
             FontSize = size,
             FontWeight = weight ?? FontWeights.Normal,
@@ -201,7 +202,7 @@ internal static class Theme
     {
         var button = new Button
         {
-            Content = text,
+            Content = InstallerLocalization.T(text),
             Template = ButtonTemplate,
             Background = background,
             Foreground = foreground,
@@ -230,10 +231,71 @@ internal static class Theme
     public static Button SubtleButton(string text, double minWidth = 0)
         => Button(text, PanelHighlight, TextPrimary, 34, minWidth);
 
+    /// <summary>
+    /// 分段选择器（语言切换这类「几选一」用）：圆角容器里并排几颗扁平按钮，选中那颗点亮成主题色。
+    /// <para>
+    /// 切换语言会整个重建窗口，所以选中态不需要动态刷新 —— 传对 selectedIndex 就行。
+    /// 按钮沿用 <see cref="ButtonTemplate"/> 的圆角外观，未选中的做成透明底、悬停才浮起来，
+    /// 免得像个突兀的灰方块贴在卡片里。
+    /// </para>
+    /// </summary>
+    public static Border Segmented(IReadOnlyList<string> options, int selectedIndex, Action<int> onSelected)
+    {
+        var container = new Border
+        {
+            Background = InsetBackground,
+            BorderBrush = Outline,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(13),
+            Padding = new Thickness(4),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            SnapsToDevicePixels = true,
+        };
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+
+        for (var i = 0; i < options.Count; i++)
+        {
+            var index = i;
+            var selected = i == selectedIndex;
+
+            var button = new Button
+            {
+                Content = options[i],
+                Template = ButtonTemplate,
+                Background = selected ? Accent : Brushes.Transparent,
+                Foreground = selected ? Brushes.White : TextMuted,
+                BorderThickness = new Thickness(0),
+                Height = 34,
+                MinWidth = 98,
+                Padding = new Thickness(14, 0, 14, 0),
+                FontFamily = Font,
+                FontSize = 13.5,
+                FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal,
+                Cursor = System.Windows.Input.Cursors.Hand,
+                FocusVisualStyle = null,
+                Margin = new Thickness(i == 0 ? 0 : 6, 0, 0, 0),
+            };
+
+            var idle = button.Background;
+            var hovered = selected ? AccentHover : PanelHighlight;
+
+            button.MouseEnter += (_, _) => button.Background = hovered;
+            button.MouseLeave += (_, _) => button.Background = idle;
+            button.Click += (_, _) => onSelected(index);
+
+            row.Children.Add(button);
+        }
+
+        container.Child = row;
+        return container;
+    }
+
     public static CheckBox CheckBox(string text, double fontSize = 13.5)
         => new()
         {
-            Content = text,
+            Content = InstallerLocalization.T(text),
             Template = CheckBoxTemplate,
             Foreground = TextMuted,
             FontFamily = Font,
@@ -298,10 +360,10 @@ internal static class Frost
     private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
 
     /// <summary>
-    /// 给窗口叠一层「白色磨砂」。GradientColor 是 ABGR —— 白色 60% 不透明 = 0x99FFFFFF。
-    /// 失败（老系统 / 被组策略关了）完全无感，界面照样是半透明白底。
+    /// 给窗口叠一层「深色磨砂」。GradientColor 是 ABGR —— 暗蓝灰（RGB 0x1E,0x22,0x2B）约 78% 不透明。
+    /// 失败（老系统 / 被组策略关了）完全无感，界面照样是半透明暗底。
     /// </summary>
-    public static void EnableAcrylic(System.Windows.Window window, byte alpha = 0x99)
+    public static void EnableAcrylic(System.Windows.Window window, byte alpha = 0xC8)
     {
         try
         {
@@ -317,7 +379,8 @@ internal static class Frost
                 AccentState = (int)AccentState.ACCENT_ENABLE_ACRYLICBLURBEHIND,
                 // AccentFlags = 2：让磨砂也盖住标题栏区域（窗口本来就无边框）。
                 AccentFlags = 2,
-                GradientColor = ((uint)alpha << 24) | 0x00FFFFFF,
+                // ABGR：高字节 alpha，随后 B=2B、G=22、R=1E。
+                GradientColor = ((uint)alpha << 24) | 0x002B221E,
             };
 
             var size = Marshal.SizeOf(accent);
@@ -342,7 +405,7 @@ internal static class Frost
         }
         catch (Exception)
         {
-            // 开不上就算了：半透明白底本身就是兜底方案。
+            // 开不上就算了：半透明暗底本身就是兜底方案。
         }
     }
 }

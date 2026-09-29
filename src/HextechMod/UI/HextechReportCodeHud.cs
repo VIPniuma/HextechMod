@@ -269,10 +269,10 @@ public sealed class HextechReportCodeHud : MonoBehaviour
 
         ReportHistory.CopyToClipboard(_code.text);
         _copied = true;
-        _buttons[0].Label.text = "已复制";
+        _buttons[0].Label.text = Localization.T("已复制");
         RefreshDetail();
 
-        HextechHud.Toast($"编号 {_code.text} 已复制 · 发给作者就能取这份报告", 6f);
+        HextechHud.Toast(Localization.T("编号 {0} 已复制 · 发给作者就能取这份报告", _code.text), 6f);
     }
 
     private void RefreshDetail()

@@ -8,3 +8,11 @@ BepInEx/
 Config.Build.user.props
 FodyWeavers.xsd
 
+_tools/api/
+.tmp*/
+
+# 私钥与凭据
+*.ppk
+*.pem
+*.key
+id_rsa*

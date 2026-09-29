@@ -379,7 +379,7 @@ internal static class HextechAdvancedPatches
             var cooldown = SkillRegistry.Get(SkillId.MechanicalHand).Cooldown;
             HextechState.Get(Character.localCharacter)?.StartCooldown(cooldown);
 
-            HextechHud.Toast($"机械手：交互距离复原 · 冷却 {cooldown:0} 秒");
+            HextechHud.Toast(Localization.T("机械手：交互距离复原 · 冷却 {0:0} 秒", cooldown));
         }
 
         /// <summary>把手缩回原来的长度（没交互就回机场、或者模组被关掉时兜底）。</summary>
@@ -437,9 +437,9 @@ internal static class HextechAdvancedPatches
         }
     }
 
-    // ── 拾取结算（拾荒者 / 机能零食 / 烫手）──────────────────────
+    // ── 拾取结算（拾荒者 / 烫手）──────────────────────
     /// <summary>
-    /// 「一件物品第一次被你拾起」的结算：拾荒者发代币、机能零食削负面状态、烫手把食物烤熟。
+    /// 「一件物品第一次被你拾起」的结算：拾荒者发代币、烫手把食物烤熟。
     /// <para>
     /// 物品到手上有两条路，两条都得结算 —— 少了哪条，那种捡法下词条会整体不生效：
     /// </para>
@@ -510,7 +510,7 @@ internal static class HextechAdvancedPatches
         /// 背包路径（手满了，物品直接落进自己背着的背包槽）：此刻物品物体是房主刚生成的视觉体，
         /// 实例数据还没下发，读不到 <c>Item.data</c>；但槽位数据里有同一个 GUID，就用它去重。
         /// <para>
-        /// 只做「拾荒者 / 机能零食」这两个纯角色侧的效果，**不烤**：<c>FinishCooking</c> 只有物品
+        /// 只做「拾荒者」这个纯角色侧的效果，**不烤**：<c>FinishCooking</c> 只有物品
         /// 控制器（房主）调得动，非房主在这里烤等于白调，还会把 GUID 提前占掉、物品真正进手时
         /// 就再也烤不上了。烤制留给它进手那一刻。
         /// </para>
@@ -539,28 +539,13 @@ internal static class HextechAdvancedPatches
             }
         }
 
-        /// <summary>「拾荒者」发代币 + 「机能零食」按当前值削一层负面状态。</summary>
+        /// <summary>「拾荒者」：每件物品第一次被拾起时发商店代币。</summary>
         private static void ApplyAwards(HextechState state, Character character)
         {
             // 「拾荒者」：每件物品第一次被拾起时发 1 枚商店代币。不设每局上限。
             if (state.StackOfId(DefaultHextechs.ScavengerId) > 0)
             {
                 state.AwardScavengerToken();
-            }
-
-            var snack = state.StackOfId(DefaultHextechs.SnackId);
-
-            if (snack > 0 && character.refs != null)
-            {
-                // 每种负面状态各按「自己当前值」削 5%（叠层走乘法口径：5% → 5.25% → 5.51%，
-                // 见 DefaultHextechs.SnackTotalRatio —— 2026-09-13 之前是每层线性再叠一份）。
-                // 以前这里挂的是游戏自带的 Affliction_HealAll，等于捡一次东西白送一次「治疗全部状态」；
-                // 再后来只压伤势与中毒，现在按词条说明改成整张负面状态表逐项相对削减。
-                var reduced = HextechPatches.ReduceHarmfulStatusesByRatio(
-                    character.refs.afflictions,
-                    DefaultHextechs.SnackTotalRatio(snack));
-
-                state.RecordEffect(DefaultHextechs.SnackId, reduced);
             }
         }
 

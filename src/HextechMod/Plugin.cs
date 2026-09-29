@@ -16,7 +16,7 @@ public sealed class HextechPlugin : BaseUnityPlugin
 {
     public const string Guid = "PeakModder.HextechMod";
     public const string Name = "HextechMod";
-    public const string Version = "0.3.51";
+    public const string Version = "0.3.86";
 
     internal static HextechPlugin Instance = null!;
     internal static ManualLogSource Log = null!;
@@ -39,6 +39,9 @@ public sealed class HextechPlugin : BaseUnityPlugin
         Log = Logger;
 
         ModConfig.Bind(Config);
+
+        // 订阅「房主权威设置」的变更：房主改商店开关 / 概率之类时要广播给全房间（见 HostSettings）。
+        HostSettings.Init();
 
         // 服务器平衡配置必须在一切注册之前生效（技能定义在注册那一刻就把数值拷进实例属性）。
         BalanceConfig.Load();

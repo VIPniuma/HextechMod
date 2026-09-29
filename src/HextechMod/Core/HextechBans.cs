@@ -32,6 +32,18 @@ public static class HextechBans
     /// <summary>当前生效的全部投票。</summary>
     public static IReadOnlyDictionary<int, string> All => Votes;
 
+    /// <summary>
+    /// 是否已经从房主手里拿到过整份名单（空名单也算 —— 说明还没有人禁过）。
+    /// <para>
+    /// 名单以房主为准：没拿到这份名单之前，本地记的票一概不认 —— 那是上一间房 / 上一局的残留，
+    /// 中途加入的玩家尤其容易被它坑（2026-09-22）。拿到的渠道是 <see cref="ReplaceAll"/>（房主补发的整份）。
+    /// </para>
+    /// </summary>
+    public static bool SyncedFromHost { get; private set; }
+
+    /// <summary>离开房间 / 换了房间时清同步标记：下一间房要向（新）房主重新要一次名单。</summary>
+    public static void MarkUnsynced() => SyncedFromHost = false;
+
     /// <summary>这个词条是不是被（任何人）禁掉了。</summary>
     public static bool IsBanned(string id)
     {
@@ -142,6 +154,9 @@ public static class HextechBans
         {
             Votes[actor] = Mine;
         }
+
+        // 房主的整份名单到手（哪怕一份票都没有）：同步完成，重试循环可以停了。
+        SyncedFromHost = true;
     }
 
     /// <summary>

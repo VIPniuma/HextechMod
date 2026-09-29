@@ -73,10 +73,19 @@ internal static class LuggageLottery
         }
 
         var prefabs = GetObjectsToSpawn(luggage, draws);
-        var positiveChance = Mathf.Clamp01(ModConfig.LuggagePositiveChance.Value);
-        var negativeChance = Mathf.Clamp01(ModConfig.LuggageNegativeChance.Value);
+        // 概率按百分数敲进来的人（2.5 想表达 2.5%）以前会被 Clamp01 夹成 1.0 = 100%，
+        // 也就是「开箱百分百出海克斯」—— 统一走 NormalizeChance 折算（见 ModConfig）。
+        var positiveChance = ModConfig.NormalizeChance(ModConfig.LuggagePositiveChance.Value);
+        var negativeChance = ModConfig.NormalizeChance(ModConfig.LuggageNegativeChance.Value);
         var hextechChance = positiveChance + negativeChance;
-        var tokenChance = Mathf.Clamp01(ModConfig.LuggageTokenChance.Value);
+        var tokenChance = ModConfig.NormalizeChance(ModConfig.LuggageTokenChance.Value);
+
+        if (ModConfig.LuggagePositiveChance.Value > 1f || ModConfig.LuggageNegativeChance.Value > 1f)
+        {
+            HextechPlugin.Log.LogInfo(
+                "[海克斯] 行李箱概率配置大于 1，已按百分数折算："
+                + $"正面 {(positiveChance * 100f):0.##}% · 负面 {(negativeChance * 100f):0.##}% · 代币 {(tokenChance * 100f):0.##}%");
+        }
         var tokenMax = Mathf.Clamp(ModConfig.LuggageTokenMax.Value, 1, MaxTokenReward);
 
         var names = new List<string>();

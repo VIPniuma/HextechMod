@@ -8,15 +8,12 @@ using UnityEngine;
 namespace PeakModder.HextechMod;
 
 /// <summary>
-/// 挂在每个 <see cref="Character"/> 上的海克斯状态：已获得的词条、层数、能量与技能。
+/// 挂在每个 <see cref="Character"/> 上的海克斯状态：已获得的词条、层数与技能。
 /// 词条效果由「角色拥有者自己的客户端」应用，其他客户端只保存一份名册用于显示。
 /// 开局什么都不带，所有词条与主动技能都只能靠点燃阶段篝火抽海克斯拿到。
 /// </summary>
 public sealed class HextechState : MonoBehaviour
 {
-    public const float MaxEnergy = 100f;
-    public const float EnergyRegenPerSecond = 7f;
-
     private static readonly List<HextechState> _instances = new();
 
     public static IReadOnlyList<HextechState> Instances => _instances;
@@ -55,11 +52,44 @@ public sealed class HextechState : MonoBehaviour
 
     private int _skillIndex;
 
+    /// <summary>
+    /// 「固定栏位」上的诅咒：登岛时自动抽到的负面（代价）词条，之后每次篝火三选一选完重抽一个。
+    /// <para>
+    /// 它**不占** 4 个普通词条的名额（<see cref="IsAtCap"/> 跳过它），也**不进替换队列**
+    /// （换不掉），只能由下一次抽诅咒时整体换掉 —— 这就是「固定栏位」的意思。
+    /// </para>
+    /// </summary>
+    private HextechEntry? _curse;
+
     // 商店代币是**连续累积**的浮点数，不再是「每满一个间隔 +1」的整数计数器：
     // 速率 1.5/分 就等于每秒 +0.025，HUD 显示到一位小数，玩家能看见它在涨。
     // 小数部分只是「还没攒够一整枚」，消费仍按整数价扣，扣完剩下的零头留在账上。
     private float _tokens;
     private bool _baselineCaptured;
+
+    /// <summary>
+    /// 按「稳定玩家身份」（actor 号，与 <see cref="ClaimedRewardsByActor"/> 同口径）记的代币账本。
+    /// <para>
+    /// 这就是「死亡后代币没了」的根源修复：PEAK 里死亡 / 复活会**销毁并重建角色对象**，
+    /// 新挂上来的 <see cref="HextechState"/> 是全新的、_tokens 从 0 开始 —— 代币原来只活在
+    /// 角色组件字段上，死一次就跟着组件一起没了（多人模式有 RunRoster 档案兜底还原，
+    /// 单人模式连档案都没有，必丢）。这份账本每帧落一笔，重建出的新实例首帧从里面把余额读回来。
+    /// </para>
+    /// 只活在内存里、回机场（<see cref="HextechManager.ResetRun"/>）整体清空，明确不做跨局保留。
+    /// </summary>
+    private static readonly Dictionary<int, float> TokensByActor = new();
+
+    /// <summary>本实例是否已经从账本里恢复过余额（每个实例一次，首帧做 —— Awake 时 PhotonView 的 Owner 可能还没挂上）。</summary>
+    private bool _tokensRestored;
+
+    /// <summary>这个角色实例已经试过「把掉线前的东西还回来」了（每个实例只还原一次）。</summary>
+    private bool _progressRestored;
+
+    /// <summary>
+    /// 正在跑「掉线重连还原」（逐条重放词条）。
+    /// 一次性副作用（加诅咒值、扎箭这类）要在这期间让开 —— 重放一遍就等于再吃一次。
+    /// </summary>
+    internal static bool RestoringProgress { get; private set; }
 
     private float _baseJumpImpulse;
     private float _baseSprintMultiplier;
@@ -82,11 +112,7 @@ public sealed class HextechState : MonoBehaviour
     private float _baseDrowsyReductionPerSecond;
     private float _baseGrabFriendDistance;
 
-    public float Energy { get; private set; } = MaxEnergy;
-
     public float CooldownRemaining { get; private set; }
-
-    public float EnergyRatio => Mathf.Clamp01(Energy / MaxEnergy);
 
     /// <summary>商店代币。局内连续累积（带小数），回机场清零。共享代币模式下改从共享池读。</summary>
     public float Tokens => ModConfig.SharedTokens.Value ? SharedTokenPool.Balance : _tokens;
@@ -111,6 +137,39 @@ public sealed class HextechState : MonoBehaviour
     /// <summary>开局一个技能都没有，想放技能必须先去抽海克斯。</summary>
     public bool HasSkill => _skills.Count > 0;
 
+    /// <summary>固定栏位上挂着的那条代价（没有则为 null）。</summary>
+    public HextechEntry? Curse => _curse;
+
+    public bool IsCursed => _curse != null;
+
+    /// <summary>这条词条是不是固定栏位上的诅咒（替换面板靠它把诅咒排除在候选之外）。</summary>
+    public bool IsCurse(HextechEntry? entry) => entry != null && ReferenceEquals(_curse, entry);
+
+    /// <summary>把一条代价挂上固定栏位：先摘掉旧的，再挂新的（效果一起重放）。</summary>
+    public void SetCurse(HextechEntry entry)
+    {
+        RemoveCurse();
+        Acquire(entry);
+        _curse = entry;
+    }
+
+    /// <summary>
+    /// 只给已有的一条词条**补上诅咒标记**（重连还原用：词条已经逐条还原过了，这里不能再拿一次）。
+    /// </summary>
+    public void MarkCurse(HextechEntry entry) => _curse = entry;
+
+    /// <summary>摘掉固定栏位上的诅咒（连效果一起清）。</summary>
+    public void RemoveCurse()
+    {
+        var curse = _curse;
+        _curse = null;
+
+        if (curse != null)
+        {
+            RemoveEntry(curse);
+        }
+    }
+
     public SkillId? CurrentSkill =>
         _skills.Count == 0 ? null : _skills[_skillIndex % _skills.Count];
 
@@ -118,10 +177,17 @@ public sealed class HextechState : MonoBehaviour
     {
         Character = GetComponent<Character>();
         _instances.Add(this);
+
+        // 不在这里恢复代币：Awake 时 PhotonView 的 Owner 未必已赋值，actor 号拿不准。
+        // 推迟到首帧 Tick 里做（见 RestoreTokensOnce）。
+        _tokensRestored = false;
     }
 
     private void OnDestroy()
     {
+        // 角色销毁前把余额最后落一次账：死亡重建的新实例首帧要从账本里读回这笔钱。
+        // 机场里不落（见 PersistTokens 的闸），免得一局结束的销毁把旧账带进下一局。
+        PersistTokens();
         _instances.Remove(this);
     }
 
@@ -190,6 +256,12 @@ public sealed class HextechState : MonoBehaviour
 
         for (var i = 0; i < _owned.Count; i++)
         {
+            // 固定栏位上的诅咒不占普通词条的名额。
+            if (ReferenceEquals(_owned[i], _curse))
+            {
+                continue;
+            }
+
             if (_owned[i].UnlocksSkill.HasValue == skillCategory)
             {
                 count++;
@@ -473,6 +545,7 @@ public sealed class HextechState : MonoBehaviour
         }
 
         _tokens -= cost;
+        PersistTokens();
         return true;
     }
 
@@ -487,11 +560,12 @@ public sealed class HextechState : MonoBehaviour
         }
 
         _tokens = Mathf.Max(0f, _tokens + amount);
+        PersistTokens();
     }
 
     /// <summary>
     /// 「拾荒者」本局靠捡东西发出的代币数（回机场清零），**只用于提示，不封顶**。
-    /// 同一件物品被丢掉再捡起来不会重复发 —— 去重和「烫手 / 机能零食」
+    /// 同一件物品被丢掉再捡起来不会重复发 —— 去重和「烫手」
     /// 共用 <see cref="TryMarkPickupSettled(Item)"/>（按物品实例 GUID 记），这里只管发币。
     /// </summary>
     /// <summary>「拾荒者」每捡起一件物品发放的代币数（小数）。2026-09-16 从 +1 改成 +0.3 做削弱：PEAK 里可捡物品极多，+1/件等于白嫖几十枚、商店变免费。</summary>
@@ -499,7 +573,7 @@ public sealed class HextechState : MonoBehaviour
 
     /// <summary>
     /// 「拾荒者」本局靠捡东西发出的代币数（回机场清零），**只用于提示，不封顶**。
-    /// 同一件物品被丢掉再捡起来不会重复发 —— 去重和「烫手 / 机能零食」
+    /// 同一件物品被丢掉再捡起来不会重复发 —— 去重和「烫手」
     /// 共用 <see cref="TryMarkPickupSettled(Item)"/>（按物品实例 GUID 记），这里只管发币。
     /// <para>2026-09-16 起改成小数累计（见 <see cref="ScavengerTokenPerPickup"/>）。</para>
     /// </summary>
@@ -512,7 +586,7 @@ public sealed class HextechState : MonoBehaviour
         AddTokens(ScavengerTokenPerPickup);
         RecordEffect(DefaultHextechs.ScavengerId, ScavengerTokenPerPickup);
 
-        HextechHud.Toast($"拾荒者：+{ScavengerTokenPerPickup:0.0} 商店代币（本局 {ScavengerTokensEarned:0.0} 枚）");
+        HextechHud.Toast(Localization.T("拾荒者：+{0:0.0} 商店代币（本局 {1:0.0} 枚）", ScavengerTokenPerPickup, ScavengerTokensEarned));
     }
 
     /// <summary>本局这件商品买过几次（商店限购用，回机场清零）。</summary>
@@ -525,11 +599,6 @@ public sealed class HextechState : MonoBehaviour
     public void RecordPurchase(string title)
     {
         _purchases[title] = PurchaseCount(title) + 1;
-    }
-
-    public void RefillEnergy()
-    {
-        Energy = MaxEnergy;
     }
 
     public void ResetCooldown()
@@ -635,12 +704,10 @@ public sealed class HextechState : MonoBehaviour
             CooldownRemaining = Mathf.Max(0f, CooldownRemaining - deltaTime);
         }
 
-        if (_skills.Count > 0)
-        {
-            Energy = Mathf.Min(MaxEnergy, Energy + EnergyRegenPerSecond * deltaTime);
-        }
-
+        // 首帧先把账本里的余额救回来（死亡 / 复活重建角色时代币不再清零），再正常累积并落账。
+        RestoreTokensOnce();
         AccrueTokens(deltaTime);
+        PersistTokens();
 
         for (var i = 0; i < _owned.Count; i++)
         {
@@ -719,8 +786,63 @@ public sealed class HextechState : MonoBehaviour
         if (whole > before)
         {
             // 攒够新的一整枚才提示一次 —— 和以前一样，只是现在「凑够一枚」的过程看得见了。
-            HextechHud.Toast($"商店代币 +{whole - before}（共 {whole} 枚）· 按 {ModConfig.ShopKey.Value} 打开商店");
+            HextechHud.Toast(Localization.T("商店代币 +{0}（共 {1} 枚）· 按 {2} 打开商店", whole - before, whole, ModConfig.ShopKey.Value));
         }
+    }
+
+    /// <summary>当前角色的稳定身份键（actor 号；单机 / 没进房时是 0，与 ClaimedRewardsByActor 同口径）。</summary>
+    private int Actor =>
+        Character != null && Character.refs != null && Character.refs.view != null
+            ? Character.refs.view.OwnerActorNr
+            : 0;
+
+    /// <summary>
+    /// 首帧把账本里的余额读回来 —— 死亡 / 复活重建出的新角色实例靠它拿回代币。
+    /// <para>
+    /// 取 max 而不是直接赋值：多人模式下稍后还会跑 RunRoster 档案还原（那份按上报间隔记账，
+    /// 可能比账本旧一点点），别让档案把账本里更新的余额冲回去；单人模式没有档案，账本就是唯一来源。
+    /// </para>
+    /// </summary>
+    private void RestoreTokensOnce()
+    {
+        if (_tokensRestored)
+        {
+            return;
+        }
+
+        _tokensRestored = true;
+
+        // 机场 = 一局的间隙，账本应当是空的（ResetRun 刚清过）；就算残留也不往新局里带。
+        if (HextechScene.InAirport || TokensByActor.Count == 0)
+        {
+            return;
+        }
+
+        if (TokensByActor.TryGetValue(Actor, out var saved) && saved > _tokens)
+        {
+            _tokens = saved;
+        }
+    }
+
+    /// <summary>
+    /// 把当前余额落进账本。机场里不记 —— 那是「一局已结束」，记了就会把旧账漏进下一局
+    /// （回机场清空 + 这里双保险，销毁顺序在前后都安全）。
+    /// </summary>
+    private void PersistTokens()
+    {
+        if (HextechScene.InAirport)
+        {
+            return;
+        }
+
+        TokensByActor[Actor] = _tokens;
+    }
+
+    /// <summary>回机场（一局结束）清空代币账本，防止跨局残留。由 <see cref="HextechManager.ResetRun"/> 无条件调用 ——
+    /// 和 <see cref="ResetClaimedRewards"/> 同一套理由：角色实例可能已经销毁，藏在实例重置里会漏清。</summary>
+    internal static void ResetTokensByActor()
+    {
+        TokensByActor.Clear();
     }
 
     /// <summary>「死而复生」：抽到词条时发一次复活机会。</summary>
@@ -759,7 +881,7 @@ public sealed class HextechState : MonoBehaviour
 
         ReviveCharges--;
         RecordEffect(AdvancedHextechs.ResurrectId, 1f);
-        HextechHud.Toast($"死而复生：把 {targetName} 拉到了你面前（剩余 {ReviveCharges} 次）");
+        HextechHud.Toast(Localization.T("死而复生：把 {0} 拉到了你面前（剩余 {1} 次）", targetName, ReviveCharges));
         return true;
     }
 
@@ -781,7 +903,7 @@ public sealed class HextechState : MonoBehaviour
         var definition = SkillRegistry.Get(skill.Value);
 
         // 「先激活、用掉才进冷却」的技能（机械手）在就绪期间不该再按一次 ——
-        // 不然会白扣一次能量和石化，手还是原来那只。
+        // 不然会白扣一次石化，手还是原来那只。
         if (!definition.CanCast(Character))
         {
             if (!string.IsNullOrEmpty(definition.BlockedHint))
@@ -791,13 +913,6 @@ public sealed class HextechState : MonoBehaviour
 
             return false;
         }
-
-        if (Energy < definition.EnergyCost)
-        {
-            return false;
-        }
-
-        Energy -= definition.EnergyCost;
 
         // 延后冷却的技能由它自己在「用掉」的那一刻调 StartCooldown。
         if (!definition.CooldownOnConsume)
@@ -810,7 +925,22 @@ public sealed class HextechState : MonoBehaviour
     }
 
     /// <summary>
-    /// 一局结束（回到机场）时清空：词条、层数、技能、能量全部还原，
+    /// 清空「各玩家已领过的登岛 / 篝火奖励」标记。
+    /// <para>
+    /// ⚠️ 必须由 <see cref="HextechManager.ResetRun"/>（回机场/主菜单）在**任何时机**直接调用 ——
+    /// 它以前藏在实例方法 <see cref="ResetForNewRun"/> 里，而那个方法只在「Instances 里有实例」时才会跑：
+    /// 回机场的瞬间旧角色实例可能已销毁、新角色还没生成（或玩家从主菜单重开一局），遍历落空，
+    /// 这份静态领取标记就跨局残留 —— 下一局登岛 / 篝火的 <see cref="TryClaimCampfireReward"/> 全部返回
+    /// 「已领过」，三选一面板一次都不弹（2026-09-16 编号 753261 的反馈）。
+    /// </para>
+    /// </summary>
+    internal static void ResetClaimedRewards()
+    {
+        ClaimedRewardsByActor.Clear();
+    }
+
+    /// <summary>
+    /// 一局结束（回到机场）时清空：词条、层数、技能全部还原，
     /// 并把本局改过的角色数值和挂上去的状态恢复成开局的样子。
     /// </summary>
     public void ResetForNewRun()
@@ -837,13 +967,17 @@ public sealed class HextechState : MonoBehaviour
         _activeFrames.Clear();
         _skills.Clear();
         _timers.Clear();
-        ClaimedRewardsByActor.Clear();
         _settledItemInstances.Clear();
         _purchases.Clear();
         _skillIndex = 0;
-        Energy = MaxEnergy;
+        _curse = null;
+
+        // 和 _curse / _timers 一样是「每局状态」：角色实例要是跨局存活，
+        // 不清的话下一局从第一帧就被 TrackProgressRestore 挡住，整局的掉线还原全部失效。
+        _progressRestored = false;
         CooldownRemaining = 0f;
         _tokens = 0f;
+        TokensByActor.Remove(Actor);
         ScavengerTokensEarned = 0;
 
         RemoveAppliedAfflictions();
@@ -1029,15 +1163,9 @@ public sealed class HextechState : MonoBehaviour
         _appliedAfflictions.Clear();
     }
 
-    public void PushState()
+    /// <summary>把名册打包成（词条 id, 层数）两个数组。同步与「本局成员档案」共用同一份口径。</summary>
+    public (string[] Ids, int[] Stacks) OwnedSnapshot()
     {
-        var view = Character == null ? null : Character.refs.view;
-
-        if (view == null || !view.IsMine || !PhotonNetwork.InRoom)
-        {
-            return;
-        }
-
         var ids = new string[_owned.Count];
         var stacks = new int[_owned.Count];
 
@@ -1047,8 +1175,31 @@ public sealed class HextechState : MonoBehaviour
             stacks[i] = _stacks[i];
         }
 
-        view.RPC(nameof(HextechRPC_SyncOwned), RpcTarget.Others, ids, stacks);
+        return (ids, stacks);
     }
+
+    public void PushState()
+    {
+        var view = Character == null ? null : Character.refs.view;
+
+        if (view == null || !view.IsMine || !PhotonNetwork.InRoom)
+        {
+            return;
+        }
+
+        var (ids, stacks) = OwnedSnapshot();
+
+        // 代币、复活次数、固定栏位上的诅咒 id 一起带走：房主那份成员档案（掉线重连还原）要靠它们，
+        // 光有名册的话重连回来代币还是 0、诅咒也会退化成普通词条。
+        // ⚠ 参数个数必须和 HextechRPC_SyncOwned 的签名一致（少一个整条 RPC 都会被丢弃）。
+        view.RPC(nameof(HextechRPC_SyncOwned), RpcTarget.Others, ids, stacks, Tokens, ReviveCharges, Curse?.Id ?? string.Empty);
+    }
+
+    /// <summary>这个角色实例是不是已经处理过还原（不管是还原成功还是确认「本来就没东西」）。</summary>
+    public bool ProgressRestored => _progressRestored;
+
+    /// <summary>标明「这份状态本来就是完好的，不用还原」（避免每帧都去查档案）。</summary>
+    public void MarkProgressIntact() => _progressRestored = true;
 
     /// <summary>
     /// 中途加入时向房主问一次「本局已经跑了多久」，用来补足商店代币。
@@ -1246,6 +1397,109 @@ public sealed class HextechState : MonoBehaviour
     }
 
     /// <summary>
+    /// 房主把自己的「全房间统一设置」广播给所有人（商店开关 / 代币速率 / 物价 / 开箱概率 / 传说权重 / 共享代币）。
+    /// 这些项原本各读各的本地 .cfg —— 房主关掉商店后队友那边照样开着，所以现在一律以房主为准。
+    /// </summary>
+    public bool BroadcastHostSettings()
+    {
+        var view = Character == null || Character.refs == null ? null : Character.refs.view;
+
+        if (view == null || !view.IsMine || !PhotonNetwork.InRoom || !PhotonNetwork.IsMasterClient)
+        {
+            return false;
+        }
+
+        var (flags, values, ints) = HostSettings.Snapshot();
+        view.RPC(nameof(HextechRPC_SyncHostSettings), RpcTarget.All, flags, values, ints);
+        return true;
+    }
+
+    /// <summary>向房主问一次当前的房间设置。中途进房 / 掉线重连的人靠它补齐。</summary>
+    public void RequestHostSettings()
+    {
+        var view = Character == null || Character.refs == null ? null : Character.refs.view;
+
+        if (view == null || view.ViewID <= 0 || PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        view.RPC(nameof(HextechRPC_RequestHostSettings), RpcTarget.MasterClient, view.ViewID);
+    }
+
+    /// <summary>房主收到询问：把当前的房间设置回给问的人。</summary>
+    [PunRPC]
+    public void HextechRPC_RequestHostSettings(int requesterViewId)
+    {
+        if (!PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        var view = PhotonView.Find(requesterViewId);
+
+        // 问的人可能刚好掉线了，那就没什么好回的。
+        if (view == null || view.Owner == null)
+        {
+            return;
+        }
+
+        var (flags, values, ints) = HostSettings.Snapshot();
+        view.RPC(nameof(HextechRPC_SyncHostSettings), view.Owner, flags, values, ints);
+    }
+
+    /// <summary>收到房主广播 / 补发的房间设置。</summary>
+    [PunRPC]
+    public void HextechRPC_SyncHostSettings(int flags, float[] values, int[] ints)
+    {
+        HostSettings.ApplyRemote(flags, values, ints);
+    }
+
+    /// <summary>
+    /// 房主收到「招蘑菇僵尸」的请求（黄毛追求者）。
+    /// 僵尸是网络对象，必须由房主生成大家才都看得到；词条有没有由发起方自己保证（和其它转房主 RPC 同口径）。
+    /// </summary>
+    [PunRPC]
+    public void HextechRPC_RequestAdmirerZombie(int requesterViewId)
+    {
+        if (!PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        var view = PhotonView.Find(requesterViewId);
+
+        // 发起的人可能刚好掉线了，那就没什么好刷的。
+        if (view == null || view.Owner == null)
+        {
+            return;
+        }
+
+        CurseHextechs.SpawnAdmirerZombieLocal();
+    }
+
+    /// <summary>
+    /// 房主收到「求生之路」的刷怪请求（5 只蘑菇僵尸 + 童子军领队）。同上，由房主生成大家才都看得到。
+    /// </summary>
+    [PunRPC]
+    public void HextechRPC_RequestLeftForDeadHorde(int requesterViewId)
+    {
+        if (!PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        var view = PhotonView.Find(requesterViewId);
+
+        if (view == null || view.Owner == null)
+        {
+            return;
+        }
+
+        CurseHextechs.SpawnLeftForDeadHordeLocal();
+    }
+
+    /// <summary>
     /// 非房主的开箱者 / 商店买家把「生成物资」的请求转给房主。
     /// 只有房主能往世界里实例化物品，位置由请求方算好。
     /// <paramref name="receiverViewId"/> 是商店买家的角色视图（-1 表示直接掉在地上）。
@@ -1278,7 +1532,13 @@ public sealed class HextechState : MonoBehaviour
     }
 
     [PunRPC]
-    public void HextechRPC_SyncOwned(string[] ids, int[] stacks)
+    public void HextechRPC_SyncOwned(
+        string[] ids,
+        int[] stacks,
+        float tokens,
+        int reviveCharges,
+        string curseId,
+        PhotonMessageInfo info)
     {
         _owned.Clear();
         _stacks.Clear();
@@ -1286,6 +1546,10 @@ public sealed class HextechState : MonoBehaviour
         _effectAmounts.Clear();
         _activeSeconds.Clear();
         _activeFrames.Clear();
+
+        _tokens = Mathf.Max(0f, tokens);
+        ReviveCharges = Mathf.Max(0, reviveCharges);
+        PersistTokens();
 
         for (var i = 0; i < ids.Length; i++)
         {
@@ -1303,5 +1567,144 @@ public sealed class HextechState : MonoBehaviour
                 UnlockSkill(entry.UnlocksSkill.Value);
             }
         }
+
+        // 顺手记进「本局成员档案」：掉线重连要靠它把人这一局攒的东西还回去（见 RunRoster）。
+        RunRoster.Record(info.Sender?.UserId, ids, stacks, tokens, reviveCharges, curseId);
+    }
+
+    /// <summary>
+    /// 向房主要一次自己这一局的成长。只有「自己那份档案也丢了」才需要走这一步 ——
+    /// 通常是游戏整个重启过（内存里的档案自然没了）。
+    /// </summary>
+    public void RequestProgress()
+    {
+        var view = Character == null || Character.refs == null ? null : Character.refs.view;
+
+        if (view == null || view.ViewID <= 0 || PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        view.RPC(nameof(HextechRPC_RequestProgress), RpcTarget.MasterClient, view.ViewID);
+    }
+
+    /// <summary>房主收到询问：把这位玩家本局的成长回给他。</summary>
+    [PunRPC]
+    public void HextechRPC_RequestProgress(int requesterViewId)
+    {
+        if (!PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        var view = PhotonView.Find(requesterViewId);
+
+        // 问的人可能刚好掉线了，那就没什么好回的。
+        if (view == null || view.Owner == null)
+        {
+            return;
+        }
+
+        if (!RunRoster.TryGet(view.Owner.UserId, out var ids, out var stacks, out var tokens, out var revive, out var curseId))
+        {
+            return;
+        }
+
+        view.RPC(nameof(HextechRPC_ApplyProgress), view.Owner, ids, stacks, tokens, revive, curseId ?? string.Empty);
+    }
+
+    /// <summary>收到房主补发的成长数据。</summary>
+    [PunRPC]
+    public void HextechRPC_ApplyProgress(string[] ids, int[] stacks, float tokens, int reviveCharges, string curseId)
+    {
+        RestoreProgress(ids, stacks, tokens, reviveCharges, curseId);
+    }
+
+    /// <summary>
+    /// 把这一局攒的东西还回来（掉线重连 / 中途加入）。
+    /// <para>
+    /// 关键是**逐条重放效果**，而不是照 <see cref="HextechRPC_SyncOwned"/> 那样只填名册 ——
+    /// 那只够「面板上显示有这个词条」，人身上没有数值、没有状态、技能也没解锁。
+    /// 所以要按层数逐次走 <see cref="Acquire"/>，让 <c>OnAcquired</c> 与代价一并生效。
+    /// </para>
+    /// </summary>
+    public void RestoreProgress(string[]? ids, int[]? stacks, float tokens, int reviveCharges, string? curseId = null)
+    {
+        if (Character == null || !Character.IsLocal || _progressRestored)
+        {
+            return;
+        }
+
+        _progressRestored = true;
+
+        // 重放期间挂上标志：一次性副作用（加诅咒值、扎箭）看到它就让开，别跟着重放再吃一次。
+        RestoringProgress = true;
+
+        // 取 max：死亡重建时账本里可能已经有比档案更新的余额（RestoreTokensOnce 先救过一次），
+        // 别让按上报间隔记账的档案把新鲜数字冲回去；游戏重启重连时账本是空的，档案值照常生效。
+        _tokens = Mathf.Max(_tokens, Mathf.Max(0f, tokens));
+        ReviveCharges = Mathf.Max(0, reviveCharges);
+        PersistTokens();
+
+        if (ids == null || ids.Length == 0)
+        {
+            // 没攒下词条（代币可能攒了一些），上面已经还过了。
+            RestoringProgress = false;
+            return;
+        }
+
+        // 先把基准取下来：重连后角色是新的、基准还没取，
+        // 这时候直接应用词条会把加成烤进基准里 —— 之后一重放就会叠两次。
+        CaptureBaseline();
+
+        _owned.Clear();
+        _stacks.Clear();
+        _effectCounts.Clear();
+        _effectAmounts.Clear();
+        _activeSeconds.Clear();
+        _activeFrames.Clear();
+        _skills.Clear();
+        _skillIndex = 0;
+
+        for (var i = 0; i < ids.Length; i++)
+        {
+            var entry = HextechRegistry.Find(ids[i]);
+
+            // 版本更新后这条词条可能已经改名 / 删掉了，跳过而不是让整份还原失败。
+            if (entry == null)
+            {
+                continue;
+            }
+
+            var count = i < stacks!.Length ? Mathf.Clamp(stacks[i], 1, entry.MaxStacks) : 1;
+
+            for (var stack = 0; stack < count; stack++)
+            {
+                // broadcast: false —— 一条一条发 RPC 太吵，最后统一推一次。
+                Acquire(entry, broadcast: false);
+            }
+        }
+
+        // 固定栏位上的诅咒：词条上面已经逐条还原了，这里只把标记补回去 ——
+        // 不补的话它会变成一条普通词条（占名额、还能被替换掉），「固定栏位」就丢了。
+        if (!string.IsNullOrEmpty(curseId))
+        {
+            for (var i = 0; i < _owned.Count; i++)
+            {
+                if (string.Equals(_owned[i].Id, curseId, StringComparison.Ordinal))
+                {
+                    MarkCurse(_owned[i]);
+                    break;
+                }
+            }
+        }
+
+        RestoringProgress = false;
+
+        HextechPlugin.Log.LogInfo(
+            $"[海克斯] 已还原掉线前的成长：{_owned.Count} 条词条、{HextechState.FormatTokens(_tokens)} 枚代币。");
+
+        // 让房主与队友那边的名册也更新成还原后的样子。
+        PushState();
     }
 }

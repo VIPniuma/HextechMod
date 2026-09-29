@@ -16,6 +16,9 @@ public sealed class HextechManager : MonoBehaviour
     /// <summary>回到这个场景就代表这一局结束了，局内海克斯全部清空。</summary>
     private const string AirportSceneName = "Airport";
 
+    /// <summary>主菜单场景名（视觉上就是机场；团灭 / 弃局后回到这里重开一局）。</summary>
+    private const string MainMenuSceneName = "MainMenu";
+
     /// <summary>「登岛奖励」用的假阶段编号。真实阶段都是 0 及以上，不会撞。</summary>
     private const int RunStartKey = -1;
 
@@ -31,6 +34,26 @@ public sealed class HextechManager : MonoBehaviour
     /// <summary>问房主「本局已经跑了多久」的重试间隔与次数上限（房主没装 mod 就永远等不到答复）。</summary>
     private const float RunElapsedAskIntervalSeconds = 3f;
     private const int RunElapsedAskAttempts = 8;
+
+    /// <summary>问房主「房间设置」的重试间隔与次数上限（和本局时长同一套做法）。</summary>
+    private const float HostSettingsAskIntervalSeconds = 3f;
+    private const int HostSettingsAskAttempts = 8;
+
+    /// <summary>向房主要「自己这一局的成长」的重试间隔与次数上限（自己那份档案丢了才需要问）。</summary>
+    private const float ProgressAskIntervalSeconds = 3f;
+    private const int ProgressAskAttempts = 8;
+
+    /// <summary>
+    /// 向房主要「调价表 / 禁用名单」的重试间隔与次数上限。中途加入的玩家靠它补齐 ——
+    /// 以前只靠回机场时问一次，而中途加入的人直接进关卡、不经过机场，那次请求永远发不出去。
+    /// </summary>
+    private const float PriceAskIntervalSeconds = 3f;
+    private const int PriceAskAttempts = 8;
+    private const float BanAskIntervalSeconds = 3f;
+    private const int BanAskAttempts = 8;
+
+    /// <summary>把自己这一局的成长上报给房主的间隔（房主那份档案靠它保持新鲜）。</summary>
+    private const float ProgressReportIntervalSeconds = 4f;
 
     /// <summary>
     /// 欠着好几次三选一时，两次面板之间留一点间隔 ——
@@ -62,11 +85,21 @@ public sealed class HextechManager : MonoBehaviour
     private float _sceneSettledAt;
     private float _runStartBeachSince = -1f;
     private bool _runStartAirborne;
+    private bool _runStartChoiceResolved;
     private float _catchUpFlushAt = -1f;
     private float _runElapsedSeconds;
     private float _runElapsedAskAt;
     private int _runElapsedAsks;
     private bool _runElapsedAnswered;
+    private float _hostSettingsAskAt;
+    private int _hostSettingsAsks;
+    private float _priceAskAt;
+    private int _priceAsks;
+    private float _banAskAt;
+    private int _banAsks;
+    private float _progressAskAt;
+    private int _progressAsks;
+    private float _progressReportAt;
 
     /// <summary>这次进机场有没有已经清过一局。用来兜住「插件是在机场场景之后才装起来的」那种启动。</summary>
     private bool _airportResetDone;
@@ -92,7 +125,7 @@ public sealed class HextechManager : MonoBehaviour
     /// </summary>
     private void Start()
     {
-        if (!_airportResetDone && HextechScene.InAirport)
+        if (!_airportResetDone && HextechScene.InMenu)
         {
             _airportResetDone = true;
             ResetRun();
@@ -122,6 +155,9 @@ public sealed class HextechManager : MonoBehaviour
     {
         public string Title = string.Empty;
         public int Key;
+
+        /// <summary>这次是不是「点燃阶段篝火」发的（选完之后要重抽固定栏位上的诅咒）。</summary>
+        public bool Campfire;
     }
 
     /// <summary>
@@ -130,11 +166,11 @@ public sealed class HextechManager : MonoBehaviour
     /// 这里会顺手把「玩家自己收起来了」的状态解开：新的一次奖励到手，
     /// 就该连着他之前跳过的那些一起弹出来 —— 跳过几次就叠几次，一次都不会少。
     /// </summary>
-    public void QueueChoice(string title, float delay)
+    public void QueueChoice(string title, float delay, bool campfire = false)
     {
         _nextChoiceKey = _nextChoiceKey >= int.MaxValue ? 1 : _nextChoiceKey + 1;
 
-        _pendingChoices.Enqueue(new PendingChoice { Title = title, Key = _nextChoiceKey });
+        _pendingChoices.Enqueue(new PendingChoice { Title = title, Key = _nextChoiceKey, Campfire = campfire });
         _pendingChoiceDelay = Mathf.Max(_pendingChoiceDelay, delay);
         _pendingChoiceHidden = false;
     }
@@ -142,17 +178,36 @@ public sealed class HextechManager : MonoBehaviour
     /// <summary>一局结束（回到机场）：把这一局拿到的东西全部清干净。</summary>
     public void ResetRun()
     {
+        // 静态领取标记无条件清：它不挂在角色实例上，藏在实例重置里的话，
+        // 「回机场瞬间角色实例还没生成 / 已销毁」或「从主菜单直接重开一局」时就会跨局残留，
+        // 下一局的登岛与篝火奖励全部被当成「已领过」，三选一面板一次都不弹。
+        HextechState.ResetClaimedRewards();
+
+        // 代币账本同理（见 TokensByActor）：静态字典不挂在角色实例上，
+        // 必须无条件清，否则上一局的余额会跨局漏进下一局。
+        HextechState.ResetTokensByActor();
+
         _pendingChoices.Clear();
         _pendingChoiceDelay = 0f;
         _pendingChoiceHidden = false;
         _runStartBeachSince = -1f;
         _runStartAirborne = false;
+        _runStartChoiceResolved = false;
         _catchUpNotes.Clear();
         _catchUpFlushAt = -1f;
         _runElapsedSeconds = 0f;
         _runElapsedAskAt = 0f;
         _runElapsedAsks = 0;
         _runElapsedAnswered = false;
+        _hostSettingsAskAt = 0f;
+        _hostSettingsAsks = 0;
+        _priceAskAt = 0f;
+        _priceAsks = 0;
+        _banAskAt = 0f;
+        _banAsks = 0;
+        _progressAskAt = 0f;
+        _progressAsks = 0;
+        _progressReportAt = 0f;
         LuggageLottery.Reset();
 
         // 共享代币池一回机场清空（见 SharedTokenPool）。
@@ -161,6 +216,9 @@ public sealed class HextechManager : MonoBehaviour
         // 禁用名单是一局一清的：回到机场就全部解除，下一局重新选。
         // 所有客户端都在自己的机场场景里走到这里，所以解除本身不需要再同步一轮。
         HextechBans.Clear();
+
+        // 本局成员档案（掉线重连还原用）也一起清：明确不做跨局保留。
+        RunRoster.Clear();
 
         var instances = HextechState.Instances;
         var hadAnything = false;
@@ -179,12 +237,16 @@ public sealed class HextechManager : MonoBehaviour
 
         // 只是启动游戏时加载机场的话，什么都没拿过，不用标题那句提示；
         // 禁用按键那句还是要说，不然没人知道机场能禁词条。
+        HextechPlugin.Log.LogInfo(
+            $"[海克斯] 回机场重置：{instances.Count} 个角色实例的词条/技能/领取标记已清空"
+            + (hadAnything ? "（上一局有残留，已清掉）" : "（上一局没有拿过东西）"));
+
         var message = hadAnything ? "本局结束 · 海克斯强化已清空" : string.Empty;
         var banKey = ModConfig.BanPanelKey.Value;
 
         if (banKey != KeyCode.None)
         {
-            var hint = $"机场里可以按 {banKey} 禁用本局不想看到的词条";
+            var hint = Localization.T("机场里可以按 {0} 禁用本局不想看到的词条", banKey);
             message = string.IsNullOrEmpty(message) ? hint : $"{message} · {hint}";
         }
 
@@ -195,7 +257,8 @@ public sealed class HextechManager : MonoBehaviour
 
         // 顺手向房主问一次当前名单：别人可能是在自己进房间之前就禁好了。
         // 商店单品调价同理 —— 房主改过的价格不能在别人那边显示成原价。
-        var local = Character.localCharacter;
+        // ⚠ 只在**房间里**问：回机场 / 主菜单通常没进房，那时候发 RPC 只会刷 PUN2 警告。
+        var local = PhotonNetwork.InRoom ? Character.localCharacter : null;
 
         if (local != null)
         {
@@ -203,14 +266,24 @@ public sealed class HextechManager : MonoBehaviour
 
             state?.RequestBans();
             state?.RequestPrices();
+            state?.RequestHostSettings();
         }
+
+        // 新词条那边的跨局残留（表情状态）也一起清。
+        CurseHextechs.ResetRunState();
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         _sceneSettledAt = Time.time;
 
-        if (string.Equals(scene.name, AirportSceneName, StringComparison.OrdinalIgnoreCase))
+        // 「一局结束」有两个归宿：组队大厅（Airport）和主菜单（MainMenu —— 它的视觉就是机场，
+        // 团灭 / 弃局后回到这里再重开一局）。以前只认 Airport，从主菜单重开的话这一枪不放，
+        // 上一局的词条与领取标记全部跨局残留（2026-09-16 编号 753261 的反馈）。
+        var isMenuScene = string.Equals(scene.name, AirportSceneName, StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(scene.name, MainMenuSceneName, StringComparison.OrdinalIgnoreCase);
+
+        if (isMenuScene)
         {
             _airportResetDone = true;
             ResetRun();
@@ -228,6 +301,12 @@ public sealed class HextechManager : MonoBehaviour
         // 界面都收起来了却还挂着窗口的话，玩家会卡在「视角和移动都动不了」，
         // 这里每帧兜底校正一次。
         HextechWindowHost.Sync();
+
+        // 离开房间后要把房主下发过的设置还回本机值。
+        // ⚠ 必须排在「模组被关掉就 return」和「没有角色就 return」**之前**：
+        // 玩家可能就是先关掉模组、再退出联机，那时角色也没了，放后面这次还原永远轮不到，
+        // 上一个房主的商店开关 / 概率会一直留在本机内存里（2026-09-20 排查发现）。
+        HostSettings.Tick();
 
         if (!ModConfig.Enabled.Value)
         {
@@ -249,6 +328,7 @@ public sealed class HextechManager : MonoBehaviour
         // 给「最近十分钟」当尺子（见 LogReporter）。
         LogReporter.Tick();
         HandleReportInput();
+        HandleHelicopterDebugInput();
 
         var local = Character.localCharacter;
 
@@ -281,6 +361,10 @@ public sealed class HextechManager : MonoBehaviour
         HextechAdvancedPatches.PickupSettlement.TickPending(Time.deltaTime);
 
         TrackRunElapsed(state);
+        TrackHostSettings(state);
+        TrackHostSync(state);
+        TrackProgressReport(state);
+        TrackProgressRestore(state);
 
         HandleRunStartChoice(state);
         HandleLateJoinCatchUp(state);
@@ -302,6 +386,139 @@ public sealed class HextechManager : MonoBehaviour
             HandleSkillInput(state);
             HandleChoiceInput(state);
         }
+    }
+
+    /// <summary>
+    /// 调试：把游戏预埋在地图里的直升机（<c>PeakSequence/Helicopter</c>，默认未激活）启用并搬到玩家身边。
+    /// <para>
+    /// ⚠ 临时测试入口 —— 验证完会和配置项一起移除。联机时只有房主按键生效。
+    /// 注意 <c>SetActive</c> 不走网络，队友看不到（先单人验证可行性）。
+    /// </para>
+    /// </summary>
+    private void HandleHelicopterDebugInput()
+    {
+        var key = ModConfig.HelicopterTestKey.Value;
+
+        if (key == KeyCode.None || !Input.GetKeyDown(key))
+        {
+            return;
+        }
+
+        HextechPlugin.Log.LogInfo("[海克斯] 调试：按下召唤直升机按键");
+
+        if (PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient)
+        {
+            HextechHud.Toast("调试：召唤直升机仅限房主 / 单人按键");
+            HextechPlugin.Log.LogInfo("[海克斯] 调试：非房主，已拦截");
+            return;
+        }
+
+        try
+        {
+            var handler = PeakHandler.Instance;
+
+            HextechPlugin.Log.LogInfo($"[海克斯] 调试：PeakHandler.Instance = {(handler == null ? "null（单例还没初始化）" : "ok")}");
+
+            if (handler == null)
+            {
+                HextechHud.Toast("调试：PeakHandler 还没初始化");
+                return;
+            }
+
+            // 真相（2026-09-20 日志）：直升机**预埋在地图里**（PeakSequence/Helicopter，默认未激活），
+            // SummonHelicopter() 只是启用它并放飞行动画，位置永远是终点。
+            // 只做 SetActive + 禁用 Animator 会「什么都看不见」—— 模型子物体是召唤流程 / 动画点亮的。
+            // 所以这版：让游戏自己跑完整召唤流程（它知道该点亮什么），然后**立刻把直升机改挂**
+            // 到玩家身边的一个空物体上（保持局部坐标不变）—— 飞行动画照放，但航线在你旁边演出来。
+            var heli = FindPreplacedHelicopter(handler);
+
+            if (heli == null)
+            {
+                HextechHud.Toast("调试：没找到预埋的直升机（看日志）");
+                HextechPlugin.Log.LogInfo("[海克斯] 调试：没找到预埋的直升机（名字 Helicopter、路径含 PeakSequence）");
+                return;
+            }
+
+            HextechPlugin.Log.LogInfo($"[海克斯] 调试：找到预埋直升机 = {DescribePath(heli)}（active={heli.activeInHierarchy}）");
+
+            foreach (Transform child in heli.transform)
+            {
+                HextechPlugin.Log.LogInfo($"[海克斯] 调试：  子物体 {child.name} active={child.gameObject.activeSelf}");
+            }
+
+            handler.SummonHelicopter();
+
+            foreach (Transform child in heli.transform)
+            {
+                HextechPlugin.Log.LogInfo($"[海克斯] 调试：  召唤后 {child.name} active={child.gameObject.activeSelf}");
+            }
+
+            var player = Character.localCharacter;
+
+            if (player == null)
+            {
+                HextechHud.Toast("调试：召唤完成，但没有本地角色，无法搬");
+                return;
+            }
+
+            // 改挂到玩家身边的空物体上；worldPositionStays=false 保留局部坐标 ——
+            // 飞行动画动的是 localPosition，整条航线就会在玩家旁边原样演出来。
+            var anchor = new GameObject("HextechHeliAnchor");
+            anchor.transform.position = player.Center + Vector3.up * 25f;
+            heli.transform.SetParent(anchor.transform, false);
+
+            HextechPlugin.Log.LogInfo($"[海克斯] 调试：直升机已改挂到 {anchor.transform.position}（队友看不到，本机生效）");
+            HextechHud.Toast("调试：直升机已改挂到你身边，看画面");
+        }
+        catch (Exception exception)
+        {
+            HextechPlugin.Log.LogError($"[海克斯] 调试：召唤并改挂直升机抛异常：{exception}");
+            HextechHud.Toast("调试：召唤并改挂直升机抛异常，看日志");
+        }
+    }
+
+    /// <summary>
+    /// 找地图里预埋的直升机：名字叫 Helicopter、路径带 PeakSequence
+    /// （排除 Cutscene 终局演出与 Helicopter_End 段的）。
+    /// 找不到就退而求其次：任意叫 Helicopter 的场景物体。
+    /// </summary>
+    private static GameObject? FindPreplacedHelicopter(PeakHandler handler)
+    {
+        GameObject? fallback = null;
+
+        foreach (var t in handler.transform.root.GetComponentsInChildren<Transform>(true))
+        {
+            if (!string.Equals(t.name, "Helicopter", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            fallback ??= t.gameObject;
+
+            var path = DescribePath(t.gameObject);
+
+            if (path.Contains("PeakSequence") && !path.Contains("Cutscene"))
+            {
+                return t.gameObject;
+            }
+        }
+
+        return fallback;
+    }
+
+    /// <summary>打出物体的完整层级路径，日志里一眼能看出它挂在谁下面。</summary>
+    private static string DescribePath(GameObject go)
+    {
+        var path = go.name;
+        var parent = go.transform.parent;
+
+        while (parent != null)
+        {
+            path = parent.name + "/" + path;
+            parent = parent.parent;
+        }
+
+        return path;
     }
 
     private static bool IsAnyUiOpen()
@@ -422,6 +639,13 @@ public sealed class HextechManager : MonoBehaviour
             return;
         }
 
+        // 本局已经处理过登岛奖励（领到、或标记残留），别每帧重判 ——
+        // 否则标记一旦被占，每个沙滩帧都刷一条 warning，把日志冲爆、也看不出真问题。
+        if (_runStartChoiceResolved)
+        {
+            return;
+        }
+
         if (_runStartBeachSince < 0f)
         {
             _runStartBeachSince = Time.time;
@@ -442,11 +666,19 @@ public sealed class HextechManager : MonoBehaviour
 
         if (!state.TryClaimCampfireReward(RunStartKey))
         {
+            HextechPlugin.Log.LogWarning("[海克斯] 登岛奖励的领取标记已存在（上一局没清干净？），这次不弹三选一。");
+            _runStartChoiceResolved = true;
             return;
         }
 
+        _runStartChoiceResolved = true;
+
+        // 登岛诅咒：固定栏位上抽一个代价。先演动画，三选一面板会等动画演完再弹出来。
+        CurseDraw.Draw(state, Localization.T("登岛诅咒 · 抽一项代价"));
+
         QueueChoice("登岛强化 · 选择一项海克斯强化", 1f);
         HextechHud.Toast("已抵达海滩 · 送你一个海克斯强化");
+        HextechPlugin.Log.LogInfo("[海克斯] 登岛奖励已发（三选一已排队）。");
     }
 
     /// <summary>
@@ -528,6 +760,147 @@ public sealed class HextechManager : MonoBehaviour
     }
 
     /// <summary>
+    /// 房间设置同步：房主改过就广播整份；客户端进房（含中途加入 / 掉线重连）主动向房主要一次，
+    /// 拿不到就隔几秒重试（和「本局时长」同一套做法）。
+    /// <para>
+    /// 商店开关、代币速率、物价、开箱概率、传说权重、共享代币原本是每人各读各的本地 .cfg：
+    /// 房主关掉商店后队友那边照样开着、概率也各抽各的 —— 现在一律以房主为准（见 <see cref="HostSettings"/>）。
+    /// </para>
+    /// </summary>
+    private void TrackHostSettings(HextechState state)
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            return;
+        }
+
+        if (PhotonNetwork.IsMasterClient)
+        {
+            // 房主自己就是权威，只负责把改动广播出去；这一帧拿不到可发的视图就下一帧再试。
+            if (HostSettings.IsDirty && state.BroadcastHostSettings())
+            {
+                HostSettings.ClearDirty();
+            }
+
+            return;
+        }
+
+        if (HostSettings.RemoteApplied || _hostSettingsAsks >= HostSettingsAskAttempts || Time.time < _hostSettingsAskAt)
+        {
+            return;
+        }
+
+        _hostSettingsAsks++;
+        _hostSettingsAskAt = Time.time + HostSettingsAskIntervalSeconds;
+        state.RequestHostSettings();
+    }
+
+    /// <summary>
+    /// 调价表 / 禁用名单的同步兜底：客户端进房后向房主要一次，没拿到就隔几秒重试（同房间设置那套）。
+    /// <para>
+    /// 以前这两份只在「回机场」时问一次 —— 但**中途加入的玩家直接进关卡、不经过机场**，
+    /// 那次请求根本不会发，结果一直用自己本地的价格 / 名单（2026-09-22 用户反馈：
+    /// 「房主定价生效开局后，再加入的玩家定价是按自己本地来的」）。
+    /// 拿到房主的整表 / 整份名单（空表也算）才算同步完成；出了房间 / 换房就当作没同步过。
+    /// </para>
+    /// </summary>
+    private void TrackHostSync(HextechState state)
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            // 出了房间（回主菜单 / 换房）：上一间房的表全部作废，下一间房重新要。
+            ShopPricing.MarkUnsynced();
+            HextechBans.MarkUnsynced();
+            _priceAsks = 0;
+            _banAsks = 0;
+            return;
+        }
+
+        // 房主自己就是权威，不需要同步。
+        if (PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        if (!ShopPricing.SyncedFromHost && _priceAsks < PriceAskAttempts && Time.time >= _priceAskAt)
+        {
+            _priceAsks++;
+            _priceAskAt = Time.time + PriceAskIntervalSeconds;
+            state.RequestPrices();
+        }
+
+        if (!HextechBans.SyncedFromHost && _banAsks < BanAskAttempts && Time.time >= _banAskAt)
+        {
+            _banAsks++;
+            _banAskAt = Time.time + BanAskIntervalSeconds;
+            state.RequestBans();
+        }
+    }
+
+    /// <summary>
+    /// 定期把自己这一局的成长上报一次：自己记一份（<see cref="RunRoster.RecordLocal"/>），
+    /// 再广播给房主 —— 房主那份档案就是靠这些广播保持新鲜的。
+    /// 掉线重连能不能还原，全看这份档案有没有记全。
+    /// </summary>
+    private void TrackProgressReport(HextechState state)
+    {
+        if (!PhotonNetwork.InRoom || HextechScene.InAirport)
+        {
+            return;
+        }
+
+        if (Time.time < _progressReportAt)
+        {
+            return;
+        }
+
+        _progressReportAt = Time.time + ProgressReportIntervalSeconds;
+        RunRoster.RecordLocal(state);
+        state.PushState();
+    }
+
+    /// <summary>
+    /// 掉线重连（或中途加入）之后，把这一局攒的东西还回来。
+    /// <para>
+    /// 顺序是「先用自己的档案、再向房主要」：自己那份在本机内存里，
+    /// 只要游戏没重启就一定比网络那份更全、也不用等一次往返；
+    /// 自己那份没了（游戏整个重启过）才需要问房主。
+    /// </para>
+    /// </summary>
+    private void TrackProgressRestore(HextechState state)
+    {
+        if (!PhotonNetwork.InRoom || HextechScene.InAirport || state.ProgressRestored)
+        {
+            return;
+        }
+
+        // 身上还带着词条 / 技能 = 这一局的东西没丢（一直在线，或上次已经还原过），不用还原。
+        if (state.Owned.Count > 0 || state.HasSkill)
+        {
+            state.MarkProgressIntact();
+            return;
+        }
+
+        if (RunRoster.TryGet(RunRoster.LocalUserId, out var ids, out var stacks, out var tokens, out var revive, out var curseId))
+        {
+            state.RestoreProgress(ids, stacks, tokens, revive, curseId);
+            AddCatchUpNote(Localization.T("已恢复掉线前的海克斯与代币"));
+            return;
+        }
+
+        // 自己这份档案是空的：可能真的还没开始（那房主那边也没有，问几次就停），
+        // 也可能是游戏重启过 —— 那种情况才需要向房主要。
+        if (PhotonNetwork.IsMasterClient || _progressAsks >= ProgressAskAttempts || Time.time < _progressAskAt)
+        {
+            return;
+        }
+
+        _progressAsks++;
+        _progressAskAt = Time.time + ProgressAskIntervalSeconds;
+        state.RequestProgress();
+    }
+
+    /// <summary>
     /// 收到房主答复的「本局已进行时长」后，把差额折成代币补给刚进局的自己。
     /// 玩家自己的代币也在同步累积，这里减掉自己那部分，所以只会补「比房主少拿到的」，不会重复发。
     /// </summary>
@@ -576,7 +949,7 @@ public sealed class HextechManager : MonoBehaviour
             return;
         }
 
-        HextechHud.Toast($"中途加入 · 补足 {string.Join("、", _catchUpNotes)}");
+        HextechHud.Toast(Localization.T("中途加入 · 补足 {0}", string.Join("、", _catchUpNotes)));
         _catchUpNotes.Clear();
         _catchUpFlushAt = -1f;
     }
@@ -645,12 +1018,22 @@ public sealed class HextechManager : MonoBehaviour
     private void OfferPendingChoice(HextechState state)
     {
         var choice = _pendingChoices.Peek();
+        var campfire = choice.Campfire;
 
         OfferChoices(
             state,
             choice.Key,
             BuildPendingTitle(),
-            onPicked: _ => ConsumePendingChoice(),
+            onPicked: _ =>
+            {
+                ConsumePendingChoice();
+
+                // 篝火这次选完：把固定栏位上的旧诅咒摘掉、重新抽一个（玩家要求的换咒节奏）。
+                if (campfire)
+                {
+                    CurseDraw.Draw(state, Localization.T("篝火诅咒 · 重新抽一项代价"));
+                }
+            },
             onDismiss: NotifyChoiceStillPending);
     }
 
@@ -695,10 +1078,10 @@ public sealed class HextechManager : MonoBehaviour
         var key = ModConfig.ChoiceKey.Value;
 
         var reopen = key == KeyCode.None
-            ? "面板上的提示里写着重新打开的按键"
-            : $"按 {key} 重新打开";
+            ? Localization.T("面板上的提示里写着重新打开的按键")
+            : Localization.T("按 {0} 重新打开", key);
 
-        HextechHud.Toast($"海克斯还没选 · 已给你留着（还欠 {_pendingChoices.Count} 次）· {reopen}");
+        HextechHud.Toast(Localization.T("海克斯还没选 · 已给你留着（还欠 {0} 次）· {1}", _pendingChoices.Count, reopen));
     }
 
     private void HandleShopInput(HextechState state, bool uiOpen)
@@ -872,7 +1255,7 @@ public sealed class HextechManager : MonoBehaviour
             {
                 if (string.IsNullOrEmpty(code))
                 {
-                    HextechHud.Toast($"日志上传失败：{error}", 8f);
+                    HextechHud.Toast(Localization.T("日志上传失败：{0}", error ?? string.Empty), 8f);
                     return;
                 }
 
@@ -966,6 +1349,14 @@ public sealed class HextechManager : MonoBehaviour
             {
                 // 「赌徒」（传说词条）：多摆一张牌 —— 三选一变四选一。
                 // 多出来的那张照样是从正面池子里随机，不额外塞负面。
+                // 「纯氧」把三选一改成三选二，牌池还会掺负面（每张 30%、一次最多 2 个）。
+                var oxygenCards = CurseHextechs.RollChoiceCards(state, random);
+
+                if (oxygenCards != null)
+                {
+                    return oxygenCards;
+                }
+
                 var count = state.StackOfId(DefaultHextechs.GamblerId) > 0 ? 4 : 3;
 
                 return HextechRegistry.Roll(state, count, random, allowNegative: false);
@@ -988,7 +1379,8 @@ public sealed class HextechManager : MonoBehaviour
                     exclude.Add(current);
                 }
 
-                return HextechRegistry.RollOne(state, random, allowNegative: false, exclude);
+                return CurseHextechs.RollOneChoiceCard(state, random, exclude)
+                       ?? HextechRegistry.RollOne(state, random, allowNegative: false, exclude);
             },
             onDismiss);
     }
@@ -1017,7 +1409,7 @@ public sealed class HextechManager : MonoBehaviour
         if (state.StackOfId(entry.Id) > 0 || !state.IsAtCap(isSkill))
         {
             state.Acquire(entry);
-            HextechHud.Toast($"获得强化：{entry.Title} · {entry.Summary(state.StackOf(entry))}");
+            HextechHud.Toast(Localization.T("获得强化：{0} · {1}", entry.Title, entry.Summary(state.StackOf(entry))));
             return;
         }
 
@@ -1067,6 +1459,12 @@ public sealed class HextechManager : MonoBehaviour
                 for (var i = 0; i < state.Owned.Count; i++)
                 {
                     var owned = state.Owned[i];
+
+                    // 固定栏位上的诅咒不给换（它只能由下一次抽诅咒整体换掉）。
+                    if (state.IsCurse(owned))
+                    {
+                        continue;
+                    }
 
                     if (owned.UnlocksSkill.HasValue == isSkill)
                     {

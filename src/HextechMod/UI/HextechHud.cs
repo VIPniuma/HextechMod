@@ -50,7 +50,7 @@ public sealed class HextechHud : MonoBehaviour
             return;
         }
 
-        Instance._toast.text = message;
+        Instance._toast.text = Localization.T(message);
         Instance._toast.color = new Color(UiFactory.Accent.r, UiFactory.Accent.g, UiFactory.Accent.b, 1f);
         Instance._toastUntil = Time.time + seconds;
     }

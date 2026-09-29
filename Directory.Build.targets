@@ -8,22 +8,14 @@
 
   <PropertyGroup>
     <!-- Set additional NuGet sources -->
-    <RestoreAdditionalProjectSources>
+    <RestoreAdditionalProjectSources Condition="'$(RestoreAdditionalProjectSources)' == ''">
       https://nuget.bepinex.dev/v3/index.json;
       https://nuget.windows10ce.com/nuget/v3/index.json
     </RestoreAdditionalProjectSources>
     <!--
-      Conditions for ThunderPipe.Sdk to Pack, and Publish to Thunderstore
-      Learn more: https://github.com/WarperSan/ThunderPipe/blob/master/ThunderPipe.Sdk/README.md
+      2026-09-16：不再打包/上传雷霆商店，ThunderPipe 的 Pack/Publish 已整体移除
+      （Sdk 引用保留 —— 构建依赖注入仍由它提供）。
     -->
-    <RunThunderPipePackAfterBuild
-      Condition="'$(RunThunderPipePackAfterBuild)' != 'false' And '$(IsThunderstorePackable)' == 'true' And '$(Configuration)' == 'Release'"
-      >true</RunThunderPipePackAfterBuild
-    >
-    <RunThunderPipePublishAfterBuild
-      Condition="'$(RunThunderPipePublishAfterBuild)' != 'false' And '$(RunThunderPipePackAfterBuild)' == 'true' And '$(PublishTS)' == 'true'"
-      >true</RunThunderPipePublishAfterBuild
-    >
   </PropertyGroup>
 
   <!-- Build dependencies -->
@@ -31,7 +23,7 @@
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
     <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" />
     <PackageReference Include="Hamunii.BepInEx.AutoPlugin" Version="2.1.*" PrivateAssets="all" />
-    <!-- Source-only polyfills for C# language features https://github.com/Sergio0694/PolySharp -->
+    <!-- Source-only polyfills for C# language features (PolySharp) -->
     <PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="all" />
   </ItemGroup>
 
@@ -78,19 +70,5 @@
       Condition="!Exists('$(_TargetDir)')"
     />
     <Copy SourceFiles="@(ModFile)" DestinationFolder="$(_TargetDir)%(Destination)" />
-  </Target>
-
-  <Target Name="MapModFilesForThunderPipe" AfterTargets="Build" BeforeTargets="ThunderPipePack">
-    <ItemGroup>
-      <ThunderstoreFile Include="@(ModFile)" />
-    </ItemGroup>
-  </Target>
-
-  <Target
-    Name="EnsureReleaseOnPublishTS"
-    BeforeTargets="ThunderPipePublish"
-    Condition="'$(RunThunderPipePublishAfterBuild)' == 'true' And '$(Configuration)' != 'Release'"
-  >
-    <Error Text="Release configuration must be used when publishing Thunderstore package." />
   </Target>
 </Project>

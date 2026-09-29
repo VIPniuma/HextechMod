@@ -7,10 +7,10 @@ using UnityEngine.UI;
 namespace PeakModder.HextechMod;
 
 /// <summary>
-/// 屏幕正下方的技能 HUD：已解锁技能排成一排，显示 CD、能量消耗与当前选中技能。
+/// 屏幕正下方的技能 HUD：已解锁技能排成一排，显示 CD 与当前选中技能。
 /// <para>
-/// 右侧挂一个「代币」小条，并提示按 L 打开商店（原先在右侧大面板里的钱包条挪到了这里；
-/// 能量条已移除，能量只在技能卡的「耗能够不够」配色上体现）。
+/// 右侧挂一个「代币」小条，并提示按 L 打开商店（原先在右侧大面板里的钱包条挪到了这里）。
+/// 能量系统已于 2026-09-16 整个删除：技能只受冷却限制，条上不再有任何能量相关显示。
 /// </para>
 /// </summary>
 public sealed class HextechSkillHud : MonoBehaviour
@@ -22,7 +22,6 @@ public sealed class HextechSkillHud : MonoBehaviour
     private const float SlotSpacing = 10f;
     private const float BarPadding = 16f;
     private const float IconSize = 50f;
-    private const float CostHeight = 22f;
     private const float BottomOffset = 26f;
 
     private const float WalletWidth = 200f;
@@ -83,7 +82,7 @@ public sealed class HextechSkillHud : MonoBehaviour
         _titleLabel.rectTransform.anchoredPosition = new Vector2(0f, BottomOffset);
         _titleLabel.rectTransform.sizeDelta = new Vector2(800f, 26f);
 
-        // 右侧的钱包条：代币 + 按 L 开商店。原先在右侧大面板里，现在挪到技能 HUD 旁边（不再显示能量）。
+        // 右侧的钱包条：代币 + 按 L 开商店。原先在右侧大面板里，现在挪到技能 HUD 旁边。
         _wallet = UiFactory.Rounded(root, UiFactory.PanelHighlight, 16);
         _wallet.rectTransform.anchorMin = new Vector2(0.5f, 0f);
         _wallet.rectTransform.anchorMax = new Vector2(0.5f, 0f);
@@ -154,7 +153,7 @@ public sealed class HextechSkillHud : MonoBehaviour
             }
 
             barWidth = count * SlotSize + Mathf.Max(0, count - 1) * SlotSpacing + BarPadding * 2f;
-            barHeight = SlotSize + CostHeight + BarPadding * 2f;
+            barHeight = SlotSize + BarPadding * 2f;
             _bar.sizeDelta = new Vector2(barWidth, barHeight);
 
             var titleY = BottomOffset + barHeight + 4f;
@@ -169,7 +168,7 @@ public sealed class HextechSkillHud : MonoBehaviour
             }
             else
             {
-                _titleLabel.text = "尚未选择技能";
+                _titleLabel.text = Localization.T("尚未选择技能");
                 _titleLabel.color = UiFactory.TextMuted;
             }
 
@@ -180,9 +179,8 @@ public sealed class HextechSkillHud : MonoBehaviour
                 var definition = SkillRegistry.Get(id);
                 var isCurrent = current.HasValue && current.Value == id;
                 var isCasting = cooldown > 0.05f && _lastCastSkill.HasValue && _lastCastSkill.Value == id;
-                var canAfford = state.Energy >= definition.EnergyCost;
 
-                UpdateSlot(slot, definition, isCurrent, isCasting, cooldown, canAfford);
+                UpdateSlot(slot, definition, isCurrent, isCasting, cooldown);
             }
         }
         else
@@ -213,7 +211,8 @@ public sealed class HextechSkillHud : MonoBehaviour
         _wallet.gameObject.SetActive(true);
 
         var warnHex = ColorUtility.ToHtmlStringRGB(UiFactory.Warning);
-        var signature = $"{state.TokensTenths}|{ModConfig.ShopKey.Value}";
+        // 语言也要进签名：切了英文之后代币行得立刻重写，不能等下一枚代币进账才变。
+        var signature = $"{Localization.IsEnglish}|{state.TokensTenths}|{ModConfig.ShopKey.Value}";
 
         if (_shownWallet == signature)
         {
@@ -222,8 +221,12 @@ public sealed class HextechSkillHud : MonoBehaviour
 
         _shownWallet = signature;
 
-        _walletTop.text = $"<color=#{warnHex}>◈ {HextechState.FormatTokens(state.Tokens)} 代币</color>";
-        _walletShop.text = $"按 {ModConfig.ShopKey.Value} 打开商店";
+        _walletTop.text = Localization.IsEnglish
+            ? $"<color=#{warnHex}>◈ {HextechState.FormatTokens(state.Tokens)} tokens</color>"
+            : $"<color=#{warnHex}>◈ {HextechState.FormatTokens(state.Tokens)} 代币</color>";
+        _walletShop.text = Localization.IsEnglish
+            ? $"Press {ModConfig.ShopKey.Value} to open the shop"
+            : $"按 {ModConfig.ShopKey.Value} 打开商店";
     }
 
     private void RebuildSlots(IReadOnlyList<SkillId> skills)
@@ -245,7 +248,7 @@ public sealed class HextechSkillHud : MonoBehaviour
             root.anchorMin = new Vector2(0f, 1f);
             root.anchorMax = new Vector2(0f, 1f);
             root.pivot = new Vector2(0f, 1f);
-            root.sizeDelta = new Vector2(SlotSize, SlotSize + CostHeight);
+            root.sizeDelta = new Vector2(SlotSize, SlotSize);
             root.anchoredPosition = new Vector2(BarPadding + i * (SlotSize + SlotSpacing), -BarPadding);
 
             var bg = UiFactory.Rounded(root, UiFactory.PanelBackgroundLight, 14);
@@ -286,14 +289,6 @@ public sealed class HextechSkillHud : MonoBehaviour
             cdLabel.fontStyle = FontStyles.Bold;
             UiFactory.Stretch(cdLabel.rectTransform, 0f, 0f, 0f, 0f);
 
-            var cost = UiFactory.Label(root, string.Empty, 16f, TextAlignmentOptions.Center, UiFactory.Accent);
-            cost.textWrappingMode = TextWrappingModes.NoWrap;
-            cost.rectTransform.anchorMin = new Vector2(0f, 0f);
-            cost.rectTransform.anchorMax = new Vector2(0f, 0f);
-            cost.rectTransform.pivot = new Vector2(0f, 0f);
-            cost.rectTransform.offsetMin = new Vector2(0f, 0f);
-            cost.rectTransform.offsetMax = new Vector2(SlotSize, CostHeight);
-
             _slots.Add(new Slot
             {
                 Root = root,
@@ -301,17 +296,13 @@ public sealed class HextechSkillHud : MonoBehaviour
                 Icon = icon,
                 Veil = veil,
                 CdLabel = cdLabel,
-                CostLabel = cost,
             });
         }
     }
 
-    private static void UpdateSlot(Slot slot, SkillDefinition definition, bool isCurrent, bool isCasting, float cooldown, bool canAfford)
+    private static void UpdateSlot(Slot slot, SkillDefinition definition, bool isCurrent, bool isCasting, float cooldown)
     {
         slot.Border.gameObject.SetActive(isCurrent);
-
-        slot.CostLabel.text = definition.EnergyCost.ToString("0");
-        slot.CostLabel.color = canAfford ? UiFactory.Accent : UiFactory.Danger;
 
         if (isCasting)
         {
@@ -327,7 +318,7 @@ public sealed class HextechSkillHud : MonoBehaviour
         {
             slot.Veil.gameObject.SetActive(false);
             slot.CdLabel.gameObject.SetActive(false);
-            slot.Icon.color = cooldown > 0.05f || !canAfford ? DimIcon : NormalIcon;
+            slot.Icon.color = cooldown > 0.05f ? DimIcon : NormalIcon;
         }
     }
 
@@ -346,6 +337,5 @@ public sealed class HextechSkillHud : MonoBehaviour
         public RawImage Icon = null!;
         public Image Veil = null!;
         public TextMeshProUGUI CdLabel = null!;
-        public TextMeshProUGUI CostLabel = null!;
     }
 }

@@ -86,8 +86,18 @@ internal sealed class MainWindow : Window
     private bool _busy;
     private bool _repoLoaded;
 
-    /// <summary>启动加载页覆盖层（Loaded 1.2 秒后淡出移除）。</summary>
+    /// <summary>启动加载页覆盖层（视频播完 / 出错 / 超上限后淡出移除）。</summary>
     private Border? _loadingOverlay;
+
+    /// <summary>启动视频淡出调度：最短停留、视频是否播完、是否到上限、是否已开始淡出。</summary>
+    private bool _splashMinElapsed;
+    private bool _splashMaxElapsed;
+    private bool _splashMediaEnded = true;
+    private bool _splashFading;
+    private string? _splashTempPath;
+
+    /// <summary>启动页底部的应用名 + 版本水印（视频态白色，回退旋转弧时藏掉）。</summary>
+    private TextBlock? _brandText;
 
     /// <summary>仓库清单（主模组 + 服务器 repository.json 里的其它模组）。</summary>
     private readonly List<RepoMod> _repoMods = new();
@@ -126,7 +136,7 @@ internal sealed class MainWindow : Window
 
     private void Build()
     {
-        Title = "小王同学模组安装器";
+        Title = InstallerLocalization.T("小王同学模组安装器");
         Width = 860;
         Height = 620;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -168,23 +178,133 @@ internal sealed class MainWindow : Window
 
         Content = root;
 
-        var loadingTimer = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(1200),
-        };
-        loadingTimer.Tick += (_, _) =>
-        {
-            loadingTimer.Stop();
-            FadeOutLoadingOverlay();
-        };
-        loadingTimer.Start();
+        // 启动视频：最短停留 1.2 秒、最长 6 秒，播完即淡出（调度在 ScheduleSplashFade 里）。
+        ScheduleSplashFade(_loadingOverlay);
 
-        // 安装到一半把窗口关了的话，别让后台任务继续往已关闭的窗口上写日志。
-        Closing += (_, _) => _cts.Cancel();
+        // 安装到一半把窗口关了的话，别让后台任务继续往已关闭的窗口上写日志；顺手清掉解出来的启动视频临时文件。
+        Closing += (_, _) =>
+        {
+            _cts.Cancel();
+            if (_splashTempPath != null)
+            {
+                try { File.Delete(_splashTempPath); } catch { /* 临时文件删不掉无所谓 */ }
+            }
+        };
     }
 
-    /// <summary>启动加载页：与窗口同圆角的覆盖层 —— 旋转弧（开源库）+ 应用名 + 版本 + 提示。</summary>
+    /// <summary>
+    /// 启动加载页：与窗口同圆角的覆盖层。优先播放内嵌启动视频（Splash.mp4，静音自动播一次），
+    /// 视频放完 / 出错 / 超过上限时淡出露出主界面；视频不可用（缺资源或 codec 不支持）时回退到旋转弧。
+    /// </summary>
     private Border BuildLoadingOverlay()
+    {
+        var overlay = new Border
+        {
+            Background = Brushes.Black,
+            CornerRadius = new CornerRadius(22),
+            ClipToBounds = true,
+        };
+
+        FrameworkElement stage;
+        var media = new MediaElement
+        {
+            Stretch = Stretch.Uniform,
+            IsMuted = true,
+            LoadedBehavior = MediaState.Play,
+            UnloadedBehavior = MediaState.Close,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+        };
+
+        if (TryExtractSplashVideo(out var tempPath))
+        {
+            _splashTempPath = tempPath;
+            media.Source = new Uri(tempPath);
+            _splashMediaEnded = false;
+
+            media.MediaEnded += (_, _) =>
+            {
+                _splashMediaEnded = true;
+                TryFadeSplash();
+            };
+            media.MediaFailed += (_, _) =>
+            {
+                // codec 不支持 / 解码失败：换回旋转弧，并藏掉白色品牌字（浅色底上会看不清）。
+                AppendLog(InstallerLocalization.T("启动视频无法播放，改用默认加载动画。"), LogLevel.Warn);
+                _brandText!.Visibility = Visibility.Collapsed;
+                overlay.Child = BuildSplashSpinner();
+                _splashMediaEnded = true;
+                TryFadeSplash();
+            };
+
+            stage = media;
+        }
+        else
+        {
+            stage = BuildSplashSpinner();
+            _splashMediaEnded = true;
+        }
+
+        var grid = new Grid();
+        grid.Children.Add(stage);
+
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        _brandText = new TextBlock
+        {
+            Text = InstallerLocalization.T("小王同学模组安装器") + "  v" + (version == null ? "?" : version.ToString(3)),
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 16),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 6,
+                ShadowDepth = 0,
+                Opacity = 0.85,
+            },
+        };
+
+        grid.Children.Add(_brandText);
+        overlay.Child = grid;
+        return overlay;
+    }
+
+    /// <summary>把内嵌的 Splash.mp4 解到临时文件（MediaElement 只能播文件 / http 地址，不能直接吃内存流）。
+    /// 解不出资源就返回 false，调用方回退旋转弧。</summary>
+    private static bool TryExtractSplashVideo(out string? tempPath)
+    {
+        tempPath = null;
+
+        try
+        {
+            var asm = typeof(MainWindow).Assembly;
+            using var res = asm.GetManifestResourceStream("PeakModder.HextechInstaller.Splash.mp4");
+
+            if (res == null)
+            {
+                return false;
+            }
+
+            tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "HextechInstaller_splash.mp4");
+
+            using (var fs = File.Create(tempPath))
+            {
+                res.CopyTo(fs);
+            }
+
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>回退用的旋转弧加载页（与原 1.4.0 一致）。</summary>
+    private static Border BuildSplashSpinner()
     {
         var spinner = new MahApps.Metro.Controls.ProgressRing
         {
@@ -198,7 +318,7 @@ internal sealed class MainWindow : Window
 
         var title = new TextBlock
         {
-            Text = "小王同学模组安装器",
+            Text = InstallerLocalization.T("小王同学模组安装器"),
             FontSize = 15,
             FontWeight = FontWeights.SemiBold,
             Foreground = Theme.TextPrimary,
@@ -218,7 +338,7 @@ internal sealed class MainWindow : Window
 
         var hint = new TextBlock
         {
-            Text = "正在加载，请稍候…",
+            Text = InstallerLocalization.T("正在加载，请稍候…"),
             FontSize = 12,
             Foreground = Theme.TextMuted,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -233,10 +353,55 @@ internal sealed class MainWindow : Window
 
         return new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF9, 0xFC)),
+            Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x2B)),
             CornerRadius = new CornerRadius(22),
             Child = stack,
         };
+    }
+
+    /// <summary>安排启动视频的淡出：最短 1.2 秒、最长 6 秒，视频播完（或回退）即淡出。</summary>
+    private void ScheduleSplashFade(Border overlay)
+    {
+        var minTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(1200),
+        };
+        minTimer.Tick += (_, _) =>
+        {
+            minTimer.Stop();
+            _splashMinElapsed = true;
+            TryFadeSplash();
+        };
+        minTimer.Start();
+
+        var maxTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(6000),
+        };
+        maxTimer.Tick += (_, _) =>
+        {
+            maxTimer.Stop();
+            _splashMaxElapsed = true;
+            TryFadeSplash();
+        };
+        maxTimer.Start();
+    }
+
+    /// <summary>满足「最短停留 +（视频已播完或已到上限）」才真正淡出，避免重复触发。</summary>
+    private void TryFadeSplash()
+    {
+        if (_splashFading || !_splashMinElapsed)
+        {
+            return;
+        }
+
+        if (!_splashMediaEnded && !_splashMaxElapsed)
+        {
+            return;
+        }
+
+        _splashFading = true;
+        FadeOutLoadingOverlay();
     }
 
     /// <summary>加载页淡出后从视觉树移除（不再参与布局，也挡不住下面的界面）。</summary>
@@ -345,6 +510,7 @@ internal sealed class MainWindow : Window
         nav.Children.Add(BuildNavItem(0, "主页"));
         nav.Children.Add(BuildNavItem(1, "前置框架"));
         nav.Children.Add(BuildNavItem(2, "模组仓库"));
+        nav.Children.Add(BuildNavItem(3, "设置"));
 
         Grid.SetRow(nav, 1);
         grid.Children.Add(nav);
@@ -454,6 +620,7 @@ internal sealed class MainWindow : Window
         _pages.Add(BuildHomePage());
         _pages.Add(BuildFrameworkPage());
         _pages.Add(BuildRepoPage());
+        _pages.Add(BuildSettingsPage());
 
         for (var i = 0; i < _pages.Count; i++)
         {
@@ -595,7 +762,7 @@ internal sealed class MainWindow : Window
         authorTexts.Children.Add(Theme.Label("小王同学", 19, Theme.TextPrimary, FontWeights.Bold));
         authorTexts.Children.Add(new TextBlock
         {
-            Text = "模组作者 · QQ " + AuthorQQ,
+            Text = InstallerLocalization.IsEnglish ? "Mod author · QQ " + AuthorQQ : "模组作者 · QQ " + AuthorQQ,
             FontFamily = Theme.Font,
             FontSize = 13,
             Foreground = Theme.TextMuted,
@@ -670,7 +837,7 @@ internal sealed class MainWindow : Window
         texts.Children.Add(Theme.Label(title, 14, Theme.TextPrimary, FontWeights.SemiBold));
         texts.Children.Add(new TextBlock
         {
-            Text = detail,
+            Text = InstallerLocalization.T(detail),
             FontFamily = Theme.Font,
             FontSize = 12.5,
             Foreground = Theme.TextMuted,
@@ -697,7 +864,7 @@ internal sealed class MainWindow : Window
         cardStack.Children.Add(Theme.Label("BepInEx 框架", 15, Theme.TextPrimary, FontWeights.Bold));
         cardStack.Children.Add(new TextBlock
         {
-            Text = "所有模组的运行前提。没有它，任何模组都不会被游戏加载。",
+            Text = InstallerLocalization.T("所有模组的运行前提。没有它，任何模组都不会被游戏加载。"),
             FontFamily = Theme.Font,
             FontSize = 12.5,
             Foreground = Theme.TextMuted,
@@ -714,7 +881,7 @@ internal sealed class MainWindow : Window
             Foreground = Theme.TextDim,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 0),
-            Text = "正在自动检测 PEAK 的安装位置…",
+            Text = InstallerLocalization.T("正在自动检测 PEAK 的安装位置…"),
         };
 
         cardStack.Children.Add(_hint);
@@ -779,6 +946,62 @@ internal sealed class MainWindow : Window
         return grid;
     }
 
+    private FrameworkElement BuildSettingsPage()
+    {
+        var stack = new StackPanel { Margin = new Thickness(4, 8, 4, 0) };
+        stack.Children.Add(Theme.Label("设置", 22, Theme.TextPrimary, FontWeights.Bold));
+
+        var card = Theme.Rounded(Theme.PanelBackgroundLight, 16, new Thickness(18, 14, 18, 14));
+        card.Margin = new Thickness(0, 14, 0, 0);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(214) });
+
+        var copy = new StackPanel();
+        copy.Children.Add(Theme.Label("语言", 15, Theme.TextPrimary, FontWeights.SemiBold));
+        var description = Theme.Label("选择安装器界面使用的语言。更改后立即生效。", 12.5, Theme.TextDim);
+        description.Margin = new Thickness(0, 5, 16, 0);
+        copy.Children.Add(description);
+        grid.Children.Add(copy);
+
+        // 语言用分段选择器而不是下拉框：两个候选项一眼看全、一点就换，
+        // 也不用为一个下拉框再单独压一套 ComboBox 的模板样式。
+        var languages = new[] { InstallerLocalization.Chinese, InstallerLocalization.English };
+        var selectedIndex = InstallerLocalization.IsEnglish ? 1 : 0;
+
+        var selector = Theme.Segmented(languages, selectedIndex, index =>
+        {
+            var language = languages[index];
+
+            if (!string.Equals(language, InstallerLocalization.Current, StringComparison.Ordinal))
+            {
+                SwitchLanguage(language);
+            }
+        });
+
+        Grid.SetColumn(selector, 1);
+        grid.Children.Add(selector);
+        card.Child = grid;
+        stack.Children.Add(card);
+        return stack;
+    }
+
+    private void SwitchLanguage(string language)
+    {
+        InstallerLocalization.Set(language);
+
+        var replacement = new MainWindow
+        {
+            Left = Left,
+            Top = Top,
+        };
+
+        Application.Current.MainWindow = replacement;
+        replacement.Show();
+        Close();
+    }
+
     /// <summary>
     /// 仓库里一张模组卡片：名称 / 在线版本 / 本机状态 / 说明 + 安装、卸载按钮。
     /// ⚠️ 最后必须 card.Child = grid —— 第一版漏了这句，整张卡片渲染成空的。
@@ -820,7 +1043,7 @@ internal sealed class MainWindow : Window
 
         var status = new TextBlock
         {
-            Text = "正在检查本机状态…",
+            Text = InstallerLocalization.T("正在检查本机状态…"),
             FontFamily = Theme.Font,
             FontSize = 13,
             Foreground = Theme.TextMuted,
@@ -1016,7 +1239,9 @@ internal sealed class MainWindow : Window
             catch (Exception exception)
             {
                 // 这个源没拉到（超时 / 解码失败），换下一个；全都失败就留「王」字占位。
-                AppendLog("头像加载失败（" + host + "）：" + exception.Message, LogLevel.Warn);
+                AppendLog(
+                InstallerLocalization.Format("头像加载失败（{0}）：{1}", host, exception.Message),
+                LogLevel.Warn);
             }
         }
     }
@@ -1033,21 +1258,21 @@ internal sealed class MainWindow : Window
             return;
         }
 
-        FlashStatus("作者 QQ 已复制：" + AuthorQQ);
+        FlashStatus(InstallerLocalization.Format("作者 QQ 已复制：{0}", AuthorQQ));
     }
 
     /// <summary>在进度条标签上闪一条提示，1.6 秒后恢复。</summary>
     private void FlashStatus(string message)
     {
         var previous = _progressLabel.Text;
-        _progressLabel.Text = message;
+        _progressLabel.Text = InstallerLocalization.T(message);
         _progressLabel.Foreground = Theme.Success;
 
         var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.6) };
         timer.Tick += (_, _) =>
         {
             timer.Stop();
-            _progressLabel.Text = previous;
+            _progressLabel.Text = InstallerLocalization.T(previous);
             _progressLabel.Foreground = Theme.TextDim;
         };
         timer.Start();
@@ -1073,8 +1298,8 @@ internal sealed class MainWindow : Window
             return;
         }
 
-        SetBusy(true, "正在读取仓库…");
-        _repoHint.Text = "正在从服务器读取仓库…";
+        SetBusy(true, InstallerLocalization.T("正在读取仓库…"));
+        _repoHint.Text = InstallerLocalization.T("正在从服务器读取仓库…");
         _repoHint.Foreground = Theme.TextDim;
 
         try
@@ -1086,13 +1311,16 @@ internal sealed class MainWindow : Window
 
             AppendLog(
                 _repoMods.Count == 0
-                    ? "仓库清单是空的（服务器还没上架任何模组）。"
-                    : $"仓库共 {_repoMods.Count} 个模组：{string.Join("、", DescribeRepoMods())}",
+                    ? InstallerLocalization.T("仓库清单是空的（服务器还没上架任何模组）。")
+                    : InstallerLocalization.Format(
+                        "仓库共 {0} 个模组：{1}",
+                        _repoMods.Count,
+                        string.Join(InstallerLocalization.IsEnglish ? ", " : "、", DescribeRepoMods())),
                 LogLevel.Success);
 
             _repoHint.Text = _repoMods.Count == 0
-                ? "仓库暂时是空的。"
-                : "点「安装」把模组放进游戏的 BepInEx\\plugins（框架没装会自动先补框架）。";
+                ? InstallerLocalization.T("仓库暂时是空的。")
+                : InstallerLocalization.T("点「安装」把模组放进游戏的 BepInEx\\plugins（框架没装会自动先补框架）。");
             _repoHint.Foreground = Theme.TextDim;
         }
         catch (OperationCanceledException)
@@ -1101,10 +1329,10 @@ internal sealed class MainWindow : Window
         }
         catch (Exception exception)
         {
-            _repoHint.Text = "仓库读取失败（可以点「刷新仓库」重试；不影响装框架）。";
+            _repoHint.Text = InstallerLocalization.T("仓库读取失败（可以点「刷新仓库」重试；不影响装框架）。");
             _repoHint.Foreground = Theme.Warning;
             AppendLog(
-                "读取模组仓库失败：" + UpdateFeed.Redact(exception.Message),
+                InstallerLocalization.Format("读取模组仓库失败：{0}", UpdateFeed.Redact(exception.Message)),
                 LogLevel.Warn);
         }
         finally
@@ -1130,7 +1358,7 @@ internal sealed class MainWindow : Window
 
         if (_gameDirectory == null)
         {
-            _repoHint.Text = "先在上方指定游戏目录，再安装模组。";
+            _repoHint.Text = InstallerLocalization.T("先在上方指定游戏目录，再安装模组。");
             return;
         }
 
@@ -1150,11 +1378,12 @@ internal sealed class MainWindow : Window
         }
 
         var status = _engine.QueryModFile(_gameDirectory, RepoFileName(state.Mod), state.Mod.Version);
-        state.Status.Text = status.Detail;
+        state.Status.Text = InstallerLocalization.T(status.Detail);
         state.Status.Foreground = status.Installed ? Theme.Success : Theme.TextMuted;
 
         var upToDate = status.Installed && status.Detail.IndexOf("已是最新", StringComparison.Ordinal) >= 0;
-        state.InstallButton.Content = status.Installed ? (upToDate ? "重装" : "更新") : "安装";
+        state.InstallButton.Content = InstallerLocalization.T(
+            status.Installed ? (upToDate ? "重装" : "更新") : "安装");
         state.UninstallButton.Visibility = status.Installed ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -1183,8 +1412,10 @@ internal sealed class MainWindow : Window
             return;
         }
 
-        SetBusy(true, $"准备安装 {mod.Name}…");
-        AppendLog($"── 安装 {mod.Name} v{mod.Version} ──", LogLevel.Info);
+        SetBusy(true, InstallerLocalization.Format("准备安装 {0}…", mod.Name));
+        AppendLog(
+            InstallerLocalization.Format("── 安装 {0} v{1} ──", mod.Name, mod.Version),
+            LogLevel.Info);
 
         var progress = new Progress<InstallProgress>(OnProgress);
 
@@ -1196,12 +1427,17 @@ internal sealed class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            AppendLog("操作已取消。", LogLevel.Warn);
+            AppendLog(InstallerLocalization.T("操作已取消。"), LogLevel.Warn);
         }
         catch (Exception exception)
         {
             AppendLog(exception.Message, LogLevel.Error);
-            MessageBox.Show(this, exception.Message, "安装失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                this,
+                exception.Message,
+                InstallerLocalization.T("安装失败"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
         finally
         {
@@ -1225,8 +1461,8 @@ internal sealed class MainWindow : Window
 
         var answer = MessageBox.Show(
             this,
-            $"确定卸载 {mod.Name} 吗？（只删这一个模组，保留框架和其它模组）",
-            "确认卸载",
+            InstallerLocalization.Format("确定卸载 {0} 吗？（只删这一个模组，保留框架和其它模组）", mod.Name),
+            InstallerLocalization.T("确认卸载"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
 
@@ -1235,7 +1471,7 @@ internal sealed class MainWindow : Window
             return;
         }
 
-        SetBusy(true, $"正在卸载 {mod.Name}…");
+        SetBusy(true, InstallerLocalization.Format("准备卸载 {0}…", mod.Name));
 
         try
         {
@@ -1293,12 +1529,17 @@ internal sealed class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            AppendLog("操作已取消。", LogLevel.Warn);
+            AppendLog(InstallerLocalization.T("操作已取消。"), LogLevel.Warn);
         }
         catch (Exception exception)
         {
             AppendLog(exception.Message, LogLevel.Error);
-            MessageBox.Show(this, exception.Message, "安装失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                this,
+                exception.Message,
+                InstallerLocalization.T("安装失败"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
         finally
         {
@@ -1316,9 +1557,11 @@ internal sealed class MainWindow : Window
         if (found == null)
         {
             _gameDirectory = null;
-            _pathText.Text = "未检测到，请手动选择 PEAK.exe";
+            _pathText.Text = InstallerLocalization.T("未检测到，请手动选择 PEAK.exe");
             _pathText.Foreground = Theme.TextDim;
-            _hint.Text = "没有自动找到 PEAK，请点上面的「浏览…」手动指定游戏目录。";
+            _hint.Text = InstallerLocalization.IsEnglish
+                ? "PEAK was not found automatically. Click Browse and select the game folder."
+                : "没有自动找到 PEAK，请点上面的「浏览…」手动指定游戏目录。";
             _hint.Foreground = Theme.Warning;
             AppendLog("自动检测失败，请手动选择游戏目录。", LogLevel.Warn);
         }
@@ -1367,7 +1610,7 @@ internal sealed class MainWindow : Window
 
         if (normalized == null)
         {
-            _hint.Text = "这个目录看起来不是 PEAK 的安装目录，请选到 PEAK.exe 那一层。";
+            _hint.Text = InstallerLocalization.T("这个目录看起来不是 PEAK 的安装目录，请选到 PEAK.exe 那一层。");
             _hint.Foreground = Theme.Danger;
             AppendLog("选中的目录里没有找到 PEAK_Data，请重新选择。", LogLevel.Error);
             return;
@@ -1551,7 +1794,7 @@ internal sealed class MainWindow : Window
         }
 
         _progressFill.Width = _progressTrack.ActualWidth * ratio;
-        _progressLabel.Text = progress.Message;
+        _progressLabel.Text = InstallerLocalization.T(progress.Message);
     }
 
     private void RefreshStatus()
@@ -1577,12 +1820,12 @@ internal sealed class MainWindow : Window
         }
         else if (bepInEx.Installed)
         {
-            _hint.Text = "框架已就绪。模组去「模组仓库」页安装。";
+            _hint.Text = InstallerLocalization.T("框架已就绪。模组去「模组仓库」页安装。");
             _hint.Foreground = Theme.Success;
         }
         else
         {
-            _hint.Text = "游戏目录已就绪。";
+            _hint.Text = InstallerLocalization.T("游戏目录已就绪。");
             _hint.Foreground = Theme.Success;
         }
     }
@@ -1590,7 +1833,7 @@ internal sealed class MainWindow : Window
     private static void ApplyRow(StatusRow row, bool installed, string detail, Brush color)
     {
         row.Dot.Fill = color;
-        row.Detail.Text = detail;
+        row.Detail.Text = InstallerLocalization.T(detail);
         row.Detail.Foreground = installed ? color : Theme.TextMuted;
     }
 
@@ -1600,13 +1843,13 @@ internal sealed class MainWindow : Window
 
         if (message != null)
         {
-            _progressLabel.Text = message;
+            _progressLabel.Text = InstallerLocalization.T(message);
         }
 
         if (!busy)
         {
             _progressFill.Width = 0;
-            _progressLabel.Text = "就绪";
+            _progressLabel.Text = InstallerLocalization.T("就绪");
             _progressLabel.Foreground = Theme.TextDim;
         }
 
@@ -1673,7 +1916,7 @@ internal sealed class MainWindow : Window
                 break;
         }
 
-        _log.Document.Blocks.Add(new Paragraph(new Run(prefix + message) { Foreground = color })
+        _log.Document.Blocks.Add(new Paragraph(new Run(prefix + InstallerLocalization.T(message)) { Foreground = color })
         {
             Margin = new Thickness(0, 0, 0, 4),
             LineHeight = 18,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using HarmonyLib;
 using Photon.Pun;
 using UnityEngine;
 
@@ -26,12 +27,14 @@ internal sealed class ShopOffer
         int maxPerRun = 0,
         string? unavailableHint = null,
         string? unavailableToast = null,
-        string? id = null)
+        string? id = null,
+        string? englishTitle = null)
     {
         // 调价表的 key。物资用 prefab 名，抽奖券用写死的短 id ——
         // 都刻意避开显示名：显示名会跟着游戏语言变，价格不该跟着语言一起丢。
         Id = string.IsNullOrEmpty(id) ? title : id;
         Title = title;
+        EnglishTitle = englishTitle;
         Description = description;
         Tag = tag;
         BaseCost = baseCost;
@@ -51,6 +54,31 @@ internal sealed class ShopOffer
     public string Id { get; }
 
     public string Title { get; }
+
+    /// <summary>PEAK 官方本地化数据里的英文名（见 <see cref="TryGetEnglishItemName"/>）；没有就 null。</summary>
+    public string? EnglishTitle { get; }
+
+    /// <summary>
+    /// 界面上显示的名字：英文模式且有官方英文名时用英文名，否则中文名。
+    /// 三重兜底（英文名 → 中文名 → 调价 key），保证**永远不会是空白**（2026-09-18 反馈的「商品没有名字」）。
+    /// </summary>
+    public string DisplayTitle
+    {
+        get
+        {
+            if (Localization.IsEnglish && !string.IsNullOrWhiteSpace(EnglishTitle))
+            {
+                return EnglishTitle!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(Title))
+            {
+                return Title;
+            }
+
+            return Id;
+        }
+    }
 
     public string Description { get; }
 
@@ -102,20 +130,24 @@ internal sealed class ShopOffer
     }
 
     /// <summary>卡片上那行短提示（置灰时显示）。</summary>
-    public string UnavailableHint => _unavailableHint ?? "暂时不可用";
+    public string UnavailableHint => _unavailableHint ?? Localization.T("暂时不可用");
 
     /// <summary>点已置灰的卡片时弹出的说明。</summary>
-    public string UnavailableToast => _unavailableToast ?? "暂时没有可以给的强化了";
+    public string UnavailableToast => _unavailableToast ?? Localization.T("暂时没有可以给的强化了");
 
     /// <summary>
     /// 买下这件商品。代币不够时返回 false 且什么都不做。
     /// <paramref name="rolls"/> 不为空表示需要播抽奖动画（结果已经在里面了）。
+    /// <para>
+    /// ⚠ 扣钱**之前**再查一次可用性（700629）：UI 置灰只是展示层，这里不拦的话
+    /// 「置灰的原因在发货时才暴露」就会变成钱扣了货没影 —— 雕像那次就是这样。
+    /// </para>
     /// </summary>
     public bool TryBuy(HextechState state, out List<RollShow>? rolls)
     {
         rolls = null;
 
-        if (SoldOut(state) || !state.TrySpendTokens(CostFor(state)))
+        if (SoldOut(state) || (_available != null && !_available(state)) || !state.TrySpendTokens(CostFor(state)))
         {
             return false;
         }
@@ -161,11 +193,69 @@ internal static class HextechShopCatalog
         }
 
         BuildHextechTab();
+
+        // 童军雕像：不在物资池里（是场景物件不是物品），静态挂进「传说物资」页，
+        // 200 枚一口价。和物资一样机场里禁售 —— 在机场生成的物件上岛后就落在错误的坐标上。
+        // ⚠ 描述里必须写明「不能复活死人」：游戏侧 PetrifiedScout 只有「生成 / 打碎」两个功能，
+        // 全程序集没有任何复活 API（2026-09-22 实读确认）。玩家老把它当复活道具买，买完发现
+        // 「没反应」（雕像只会在买家面前生成、绑定买家自己）就来反馈。
+        Tabs[4].Add(new ShopOffer(
+            "童军雕像",
+            "一座石化童军雕像，照买家形象定制，生成在你面前（联机由房主代为生成）。只是个撞狠了会碎的物理物件 —— 它不能复活死人。",
+            "特殊",
+            200,
+            RarityColor(Rarity.Legendary),
+            DropScoutStatue,
+            icon: ScoutStatueIcon(),
+            glyph: "▲",
+            available: _ => !HextechScene.InAirport && ScoutStatueLoadablePath() != null,
+            unavailableHint: "上岛之后再买",
+            unavailableToast: "机场里生成的雕像上岛后会落在错误的坐标上，等于白买 —— 上岛之后再买",
+            id: "statue.scout",
+            englishTitle: "Scout Statue"));
     }
 
     public static string TabTitle(int tab)
     {
-        return tab >= 0 && tab < TabTitles.Length ? TabTitles[tab] : TabTitles[0];
+        var title = tab >= 0 && tab < TabTitles.Length ? TabTitles[tab] : TabTitles[0];
+        return Localization.T(title);
+    }
+
+    // ── 物品英文名（PEAK 官方资产数据）──────────────────────────
+    //
+    // 英文名**不是我们翻的**：Item.UIData.itemName 是游戏资产里写的原始名字（英文原文），
+    // 这正是 PEAK 自己给这件物品起的官方英文名。第一版去翻 LocalizedText 的文本表，
+    // 表结构对不上导致一堆卡片名字空白（2026-09-18 反馈），换成直接读 itemName。
+    private static Dictionary<string, string>? _englishNames;
+    private static bool _englishNamesBroken;
+
+    internal static string? TryGetEnglishItemName(Item item)
+    {
+        if (!Localization.IsEnglish || _englishNamesBroken || item == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var data = item.UIData;
+            var name = data != null ? data.itemName : null;
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            _englishNames ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            _englishNames[name] = name;
+            return name;
+        }
+        catch (Exception)
+        {
+            // 读不到就算了：商店宁可用中文名，也不能因为取英文名挂掉。
+            _englishNamesBroken = true;
+            return null;
+        }
     }
 
     /// <summary>取某一类的商品。物资分类是第一次打开商店时扫描游戏物品表得到的。</summary>
@@ -232,7 +322,7 @@ internal static class HextechShopCatalog
             "海克斯抽奖 · 青铜",
             "随机 1 项正面强化，以青铜为主，小概率直接开出白银或黄金。整局限购 1 次。",
             "青铜",
-            18,
+            72,
             UiFactory.QualityColor(HextechQuality.Bronze),
             state => DrawOne(state, null, "海克斯抽奖 · 青铜"),
             available: state => HextechRegistry.HasAny(state, maxQuality: HextechQuality.Gold),
@@ -244,7 +334,7 @@ internal static class HextechShopCatalog
             "海克斯抽奖 · 白银",
             "保底白银，有一定概率直接开出黄金。整局限购 1 次。",
             "白银",
-            45,
+            180,
             UiFactory.QualityColor(HextechQuality.Silver),
             state => DrawOne(state, HextechQuality.Silver, "海克斯抽奖 · 白银"),
             available: state => HextechRegistry.HasAny(state, HextechQuality.Silver, HextechQuality.Gold),
@@ -256,7 +346,7 @@ internal static class HextechShopCatalog
             "海克斯抽奖 · 黄金",
             "必定开出 1 项黄金强化。整局限购 1 次。",
             "黄金",
-            90,
+            360,
             UiFactory.QualityColor(HextechQuality.Gold),
             state => DrawOne(state, HextechQuality.Gold, "海克斯抽奖 · 黄金"),
             available: state => HextechRegistry.HasAny(state, HextechQuality.Gold, HextechQuality.Gold),
@@ -268,7 +358,7 @@ internal static class HextechShopCatalog
             "强化礼包 · 三连",
             "一次开出 3 项互不重复的正面强化，比单抽划算。整局限购 1 次。",
             "组合",
-            55,
+            220,
             UiFactory.Warning,
             DrawBundle,
             available: state => HextechRegistry.HasAny(state),
@@ -325,7 +415,7 @@ internal static class HextechShopCatalog
             shows.Add(new RollShow("强化礼包 · 三连", pool, ToSlot(entry, state.StackOf(entry))));
         }
 
-        HextechHud.Toast($"礼包开出：{string.Join("、", entries.ConvertAll(entry => entry.Title))}");
+        HextechHud.Toast(Localization.T("礼包开出：{0}", string.Join("、", entries.ConvertAll(entry => entry.Title))));
         return shows;
     }
 
@@ -533,7 +623,8 @@ internal static class HextechShopCatalog
             available: _ => !HextechScene.InAirport,
             unavailableHint: "上岛之后再买",
             unavailableToast: "机场里掉出来的物资上岛后会落在错误的坐标上，等于白买 —— 上岛之后再买",
-            id: prefabName));
+            id: prefabName,
+            englishTitle: TryGetEnglishItemName(item)));
 
         return true;
     }
@@ -589,7 +680,7 @@ internal static class HextechShopCatalog
 
     private static string RarityName(Rarity rarity)
     {
-        return rarity switch
+        return Localization.T(rarity switch
         {
             Rarity.Uncommon => "精良",
             Rarity.Rare => "稀有",
@@ -598,7 +689,7 @@ internal static class HextechShopCatalog
             Rarity.Mythic => "神话",
             Rarity.RidiculouslyRare => "荒诞",
             _ => "普通",
-        };
+        });
     }
 
     private static Color RarityColor(Rarity rarity)
@@ -639,5 +730,158 @@ internal static class HextechShopCatalog
         return character.transform.position
                + (character.transform.forward * 2f)
                + (Vector3.up * 1.5f);
+    }
+
+    // ── 童军雕像 ─────────────────────────────────────────────────
+    /// <summary>
+    /// 雕像的 prefab 名是游戏自己的常量（<c>Character.PETRIFIED_PREFAB</c>），不随语言和版本变；
+    /// 发货走物资同一条通道（非房主转给房主生成），只是它不是 Item，房主侧会走「场景物件」分支
+    /// 并用原版 RPC 把雕像绑定成买家的石化形态（见 <see cref="HextechSpawning.Spawn"/>）。
+    /// </summary>
+    private static List<RollShow>? DropScoutStatue(HextechState state)
+    {
+        var character = state.Character;
+
+        if (character == null)
+        {
+            return null;
+        }
+
+        string? prefabName;
+
+        try
+        {
+            prefabName = AccessTools.Field(typeof(Character), "PETRIFIED_PREFAB")?.GetValue(null) as string;
+        }
+        catch (Exception)
+        {
+            prefabName = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(prefabName))
+        {
+            HextechPlugin.Log.LogWarning("童军雕像生成失败：游戏没有提供 PETRIFIED_PREFAB 预制体名。");
+            HextechHud.Toast("雕像暂时生成不了");
+            return null;
+        }
+
+        // 700629：Photon 的 DefaultPool 只会 Resources.Load，路径不对就静默返回 null ——
+        // 而购买流程先扣钱后发货，玩家白扣 200 枚。发货前先确认这条路径真的能加载。
+        var loadablePath = ScoutStatueLoadablePath();
+
+        if (loadablePath == null)
+        {
+            HextechPlugin.Log.LogWarning(
+                $"[海克斯] 童军雕像生成失败：Resources 里找不到 {prefabName}（试过裸名 / 0_Items/ / Items/）。");
+            HextechHud.Toast("雕像暂时生成不了");
+            return null;
+        }
+
+        HextechSpawning.RequestSpawn(null, new[] { loadablePath }, new[] { Origin(character) }, kinematic: false, giveTo: character);
+        return null;
+    }
+
+    /// <summary>
+    /// 探测雕像预制体真正能被 Photon 加载的 Resources 路径，找不到返回 null。
+    /// PETRIFIED_PREFAB 是裸名「PetrifiedScout」，但游戏版本之间资源位置不一定一致 ——
+    /// 挨个候选路径试（裸名 / 0_Items/ / Items/），找到哪个能 Load 就用哪个发货。
+    /// </summary>
+    internal static string? ScoutStatueLoadablePath()
+    {
+        string? prefabName;
+
+        try
+        {
+            prefabName = AccessTools.Field(typeof(Character), "PETRIFIED_PREFAB")?.GetValue(null) as string;
+        }
+        catch (Exception)
+        {
+            prefabName = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(prefabName))
+        {
+            return null;
+        }
+
+        foreach (var candidate in new[] { prefabName, "0_Items/" + prefabName, "Items/" + prefabName })
+        {
+            if (Resources.Load<GameObject>(candidate) != null)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static Texture2D? _scoutStatueIcon;
+
+    /// <summary>
+    /// 从游戏自带的 PetrifiedScout 预制体里抠出图标：优先 SpriteRenderer（UI 图标），
+    /// 没有就退而取 MeshRenderer 的材质贴图（石像真实纹理）。都拿不到返回 null，UI 回退到符号。
+    /// </summary>
+    private static Texture2D? ScoutStatueIcon()
+    {
+        if (_scoutStatueIcon != null)
+        {
+            return _scoutStatueIcon;
+        }
+
+        string? prefabName = null;
+        try
+        {
+            prefabName = AccessTools.Field(typeof(Character), "PETRIFIED_PREFAB")?.GetValue(null) as string;
+        }
+        catch (Exception)
+        {
+            prefabName = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(prefabName))
+        {
+            return null;
+        }
+
+        // 生成走 Photon 的 0_Items/ 路径（见 HextechSpawning.Spawn 的报错），多试几个前缀兜底。
+        GameObject? prefab = null;
+        foreach (var path in new[] { prefabName, "0_Items/" + prefabName, "Items/" + prefabName })
+        {
+            prefab = Resources.Load<GameObject>(path);
+            if (prefab != null)
+            {
+                break;
+            }
+        }
+
+        if (prefab == null)
+        {
+            HextechPlugin.Log.LogWarning($"童军雕像图标抓取失败：Resources 里找不到预制体 \"{prefabName}\"。");
+            return null;
+        }
+
+        foreach (var sr in prefab.GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            if (sr.sprite != null && sr.sprite.texture != null)
+            {
+                _scoutStatueIcon = sr.sprite.texture;
+                HextechPlugin.Log.LogInfo($"童军雕像图标来自 SpriteRenderer：{sr.sprite.name}（{_scoutStatueIcon.width}x{_scoutStatueIcon.height}）");
+                return _scoutStatueIcon;
+            }
+        }
+
+        foreach (var mr in prefab.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            var mat = mr.sharedMaterial;
+            if (mat != null && mat.mainTexture is Texture2D tex && tex.width > 1 && tex.height > 1)
+            {
+                _scoutStatueIcon = tex;
+                HextechPlugin.Log.LogInfo($"童军雕像图标来自 MeshRenderer 材质：{tex.name}（{tex.width}x{tex.height}）");
+                return _scoutStatueIcon;
+            }
+        }
+
+        HextechPlugin.Log.LogWarning("童军雕像预制体上既没有 SpriteRenderer 也没有可用的材质贴图，图标回退到符号。");
+        return null;
     }
 }

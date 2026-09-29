@@ -193,8 +193,8 @@ public sealed class HextechBanPanel : MonoBehaviour
         EnsureVisibleRows();
 
         var key = ModConfig.BanPanelKey.Value;
-        var closeHint = key == KeyCode.None ? "ESC" : $"{key} 或 ESC";
-        _hint.text = $"滚轮浏览全部词条 · 点击一行禁用 / 取消 · 按 {closeHint} 关闭";
+        var closeHint = key == KeyCode.None ? "ESC" : Localization.T("{0} 或 ESC", key);
+        _hint.text = Localization.T("滚轮浏览全部词条 · 点击一行禁用 / 取消 · 按 {0} 关闭", closeHint);
 
         _canvas.enabled = true;
         IsOpen = true;

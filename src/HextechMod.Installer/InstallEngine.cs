@@ -365,7 +365,8 @@ internal sealed class InstallEngine
             // 官方命名之外还有别的 preloader，退一步只看 core 目录在不在。
             if (!Directory.Exists(location.CoreDirectory))
             {
-                return new ComponentStatus(false, "未安装，安装时自动下载");
+                return new ComponentStatus(
+                    false, InstallerLocalization.T("未安装，安装时自动下载"));
             }
 
             return new ComponentStatus(true, DescribeBepInEx(null));
@@ -375,7 +376,9 @@ internal sealed class InstallEngine
     }
 
     private static string DescribeBepInEx(string? version)
-        => version == null ? "已安装" : "已安装 · " + version;
+        => version == null
+            ? InstallerLocalization.T("已安装")
+            : InstallerLocalization.Format("已安装 · v{0}", version);
 
     /// <summary>
     /// 已安装的模组状态（按 dll 文件名查）。<paramref name="latest"/> 是服务器上的版本号
@@ -394,24 +397,29 @@ internal sealed class InstallEngine
             {
                 if (File.Exists(Path.Combine(root, PluginsFolderName, fileName)))
                 {
-                    return new ComponentStatus(false, "只在雷霆商店 profile 里 · 从 Steam 启动不生效");
+                    return new ComponentStatus(
+                        false, InstallerLocalization.T("只在雷霆商店 profile 里 · 从 Steam 启动不生效"));
                 }
             }
 
             return new ComponentStatus(
                 false,
-                latest == null ? "未安装" : "未安装 · 在线版 v" + latest);
+                latest == null
+                    ? InstallerLocalization.T("未安装")
+                    : InstallerLocalization.Format("未安装 · 在线版 v{0}", latest));
         }
 
         var version = ReadFileVersion(path);
-        var text = version == null ? "已安装" : "已安装 · v" + version;
+        var text = version == null
+            ? InstallerLocalization.T("已安装")
+            : InstallerLocalization.Format("已安装 · v{0}", version);
 
         if (latest != null)
         {
             // 读不出已装版本号时宁愿说「可更新」—— 多说一句比让玩家漏掉更新强。
             text += version != null && !UpdateFeed.IsNewer(latest, version)
-                ? " · 已是最新"
-                : " · 可更新到 v" + latest;
+                ? InstallerLocalization.Format(" · 已是最新")
+                : InstallerLocalization.Format(" · 可更新到 v{0}", latest);
         }
 
         return new ComponentStatus(true, text);
@@ -612,7 +620,7 @@ internal sealed class InstallEngine
         // 这里照样往游戏目录补一份完整的（doorstop 的相对路径从 Steam 启动找不到 profile 里的东西）。
         if (!QueryBepInEx(gameDirectory).Installed)
         {
-            Log("BepInEx 框架还没装，先补框架（一次就好，以后装别的模组不会再下）…", LogLevel.Info);
+            Log(InstallerLocalization.T("BepInEx 框架还没装，先补框架（一次就好，以后装别的模组不会再下）…"), LogLevel.Info);
             await InstallFrameworkAsync(gameDirectory, progress, token).ConfigureAwait(false);
         }
 
@@ -622,11 +630,13 @@ internal sealed class InstallEngine
         var downloaded = await UpdateFeed.DownloadAsync(mod, progress, token).ConfigureAwait(false);
 
         Log(
-            $"已获取 {mod.Name} v{mod.Version}（{FormatSize(downloaded.Length)}）"
-            + (string.IsNullOrWhiteSpace(mod.Sha256) ? string.Empty : "，SHA256 校验通过"),
+            InstallerLocalization.Format("已获取 {0} v{1}（{2}）", mod.Name, mod.Version, FormatSize(downloaded.Length))
+            + (string.IsNullOrWhiteSpace(mod.Sha256)
+                ? string.Empty
+                : InstallerLocalization.Format("，SHA256 校验通过")),
             LogLevel.Success);
 
-        progress?.Report(new InstallProgress($"部署 {mod.Name}…", 0.92));
+        progress?.Report(new InstallProgress(InstallerLocalization.Format("部署 {0}…", mod.Name), 0.92));
         DeployFile(gameDirectory, fileName, downloaded);
 
         // 再往 Mod Manager 的 profile 同步一份 —— 从那边启动时加载的是 profile 里的框架，
@@ -636,8 +646,9 @@ internal sealed class InstallEngine
         // 「框架是本安装器装的」这个事实要一直记着（卸载框架时靠它判断能不能删）。
         RegisterInstalledFile(gameDirectory, fileName);
 
-        progress?.Report(new InstallProgress($"{mod.Name} v{mod.Version} 安装完成", 1));
-        Log($"{mod.Name} v{mod.Version} 安装完成。", LogLevel.Success);
+        progress?.Report(new InstallProgress(
+            InstallerLocalization.Format("{0} v{1} 安装完成", mod.Name, mod.Version), 1));
+        Log(InstallerLocalization.Format("{0} v{1} 安装完成。", mod.Name, mod.Version), LogLevel.Success);
     }
 
     /// <summary>
@@ -652,15 +663,14 @@ internal sealed class InstallEngine
 
         if (bepInEx.Installed && File.Exists(ResolveBepInEx(gameDirectory).PreloaderPath))
         {
-            Log("BepInEx 框架已存在，无需安装。", LogLevel.Success);
+            Log(InstallerLocalization.T("BepInEx 框架已存在，无需安装。"), LogLevel.Success);
             return;
         }
 
         if (HasModManagerBepInEx(gameDirectory))
         {
             Log(
-                "检测到 BepInEx 装在雷霆商店 / r2modman 的 profile 里：那份只有从 Mod Manager "
-                + "启动才加载得到，从 Steam 启动是空转。这里会把完整框架补到游戏目录。",
+                InstallerLocalization.T("检测到 BepInEx 装在雷霆商店 / r2modman 的 profile 里：那份只有从 Mod Manager 启动才加载得到，从 Steam 启动是空转。这里会把完整框架补到游戏目录。"),
                 LogLevel.Warn);
         }
 
@@ -671,13 +681,16 @@ internal sealed class InstallEngine
         var previous = ReadManifest(gameDirectory);
         WriteManifest(ResolveBepInEx(gameDirectory), previous.BepInExInstalledByInstaller || true);
 
-        progress?.Report(new InstallProgress("框架安装完成", 1));
-        Log("BepInEx 框架安装完成，可以去「模组仓库」挑模组装了。", LogLevel.Success);
+        progress?.Report(new InstallProgress(InstallerLocalization.T("框架安装完成"), 1));
+        Log(InstallerLocalization.T("BepInEx 框架安装完成，可以去「模组仓库」挑模组装了。"), LogLevel.Success);
     }
 
     private async Task InstallBepInExCoreAsync(string gameDirectory, IProgress<InstallProgress>? progress, CancellationToken token)
     {
-        Log("未检测到 BepInEx 框架，开始下载 BepInExPack_PEAK " + BepInExPackVersion + "…", LogLevel.Warn);
+        Log(
+            InstallerLocalization.Format(
+                "未检测到 BepInEx 框架，开始下载 BepInExPack_PEAK {0}…", BepInExPackVersion),
+            LogLevel.Warn);
 
         var archive = Path.Combine(Path.GetTempPath(), "HextechInstaller", "BepInExPack_PEAK.zip");
         Directory.CreateDirectory(Path.GetDirectoryName(archive)!);
@@ -687,15 +700,18 @@ internal sealed class InstallEngine
             await DownloadWithFallbackAsync(progress, token, archive).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
 
-            progress?.Report(new InstallProgress("解压 BepInEx 框架…", 0.8));
-            Log("下载完成，" + FormatSize(new FileInfo(archive).Length) + "，开始解压…", LogLevel.Info);
+            progress?.Report(new InstallProgress(InstallerLocalization.T("解压 BepInEx 框架…"), 0.8));
+            Log(
+                InstallerLocalization.Format("下载完成，{0}，开始解压…", FormatSize(new FileInfo(archive).Length)),
+                LogLevel.Info);
 
             var extracted = ExtractArchive(archive, gameDirectory);
-            Log($"已释放 {extracted} 个文件到游戏目录。", LogLevel.Success);
+            Log(InstallerLocalization.Format("已释放 {0} 个文件到游戏目录。", extracted), LogLevel.Success);
 
             if (!File.Exists(Path.Combine(gameDirectory, PreloaderRelative)))
             {
-                throw new InvalidOperationException("解压后的目录里没有 BepInEx 核心文件，压缩包结构可能变了。");
+                throw new InvalidOperationException(
+                    InstallerLocalization.T("解压后的目录里没有 BepInEx 核心文件，压缩包结构可能变了。"));
             }
         }
         finally
@@ -728,13 +744,15 @@ internal sealed class InstallEngine
             catch (Exception exception)
             {
                 last = exception;
-                Log("从 " + ShortHost(url) + " 下载失败：" + exception.Message, LogLevel.Warn);
+                Log(
+                    InstallerLocalization.Format("从 {0} 下载失败：{1}", ShortHost(url), exception.Message),
+                    LogLevel.Warn);
             }
         }
 
         throw new InvalidOperationException(
-            "BepInEx 框架下载失败，请检查网络（或代理）后重试。" + Environment.NewLine +
-            "最后一条错误：" + (last?.Message ?? "未知错误"), last);
+            InstallerLocalization.T("BepInEx 框架下载失败，请检查网络（或代理）后重试。") + Environment.NewLine +
+            InstallerLocalization.T("最后一条错误：") + (last?.Message ?? InstallerLocalization.T("未知错误")), last);
     }
 
     private static async Task DownloadAsync(

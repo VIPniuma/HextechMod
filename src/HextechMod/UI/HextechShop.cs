@@ -100,6 +100,20 @@ public sealed class HextechShop : MonoBehaviour
     private Image _presetPickBackground = null!;
     private RectTransform _presetPickButton = null!;
 
+    // ── 单品调价输入框（2026-09-22）：调价模式下点卡片本体弹出，直接敲数字定精确价 ──
+    private RectTransform _priceDialogRoot = null!;
+    private Image _priceDialogBackdrop = null!;
+    private RectTransform _priceDialogBox = null!;
+    private TextMeshProUGUI _priceDialogTitle = null!;
+    private TextMeshProUGUI _priceDialogValue = null!;
+    private Image _priceDialogOkBackground = null!;
+    private RectTransform _priceDialogOkButton = null!;
+    private Image _priceDialogCancelBackground = null!;
+    private RectTransform _priceDialogCancelButton = null!;
+    private bool _priceDialogOpen;
+    private string _priceDialogBuffer = string.Empty;
+    private ShopOffer? _priceDialogOffer;
+
     private RectTransform _tabRoot = null!;
 
     private readonly List<RectTransform> _tabRects = new();
@@ -189,7 +203,9 @@ public sealed class HextechShop : MonoBehaviour
 
         var subtitle = UiFactory.Label(
             header.transform,
-            $"局内每分钟获得 {ModConfig.TokensPerMinute.Value:0.##} 枚代币 · 抽奖券开出的都是本局强化",
+            Localization.IsEnglish
+                ? $"Earn {ModConfig.TokensPerMinute.Value:0.##} tokens per minute in a run · Tickets give run-only Hextechs"
+                : $"局内每分钟获得 {ModConfig.TokensPerMinute.Value:0.##} 枚代币 · 抽奖券开出的都是本局强化",
             17f,
             TextAlignmentOptions.Left,
             UiFactory.TextMuted);
@@ -339,6 +355,9 @@ public sealed class HextechShop : MonoBehaviour
             panel, "保存为预设", 200f, -PanelPadding, UiFactory.Accent, out _presetSaveBackground);
         _presetPickButton = BuildFooterButton(
             panel, "选择预设 ▾", 240f, -PanelPadding - 208f, UiFactory.PanelHighlight, out _presetPickBackground);
+
+        // 单品调价输入框：调价模式下点卡片本体弹出，直接敲数字定精确价。
+        BuildPriceDialog(panel);
     }
 
     /// <summary>底栏右下角那种小按钮：锚在右下、默认藏起来，布局和「重置全部调价」同一行。</summary>
@@ -434,6 +453,7 @@ public sealed class HextechShop : MonoBehaviour
         // 调价模式是「这一次开商店」的事，关掉就退出，免得下次进来一点到卡片就以为是购买。
         _editingPrices = false;
         SetPriceEditingButtons(false);
+        ClosePriceDialog();
 
         HextechWindowHost.Sync();
     }
@@ -443,14 +463,21 @@ public sealed class HextechShop : MonoBehaviour
     {
         if (_editingPrices)
         {
-            _hint.text = ShopPricing.CanEdit
-                ? "调价模式 · 点 − / ＋ 改这一件的基础价（按住 Shift 一次 5 枚）· 右下可存成预设 / 换预设 · 再按 T 退出"
-                : "联机时只有房主能调价";
+            _hint.text = Localization.IsEnglish
+                ? ShopPricing.CanEdit
+                    ? "Price editing · click a card to type an exact price, − / ＋ to nudge (Shift for steps of 5) · save/load presets bottom-right · press T to exit"
+                    : "Only the host can edit prices in multiplayer"
+                : ShopPricing.CanEdit
+                    ? "调价模式 · 点卡片直接输入价格，− / ＋ 微调（按住 Shift 一次 5 枚）· 右下可存成预设 / 换预设 · 再按 T 退出"
+                    : "联机时只有房主能调价";
             return;
         }
 
-        _hint.text = $"滚轮下滑浏览全部商品 · 点击卡片购买 · 按 {ModConfig.ShopKey.Value} 或 ESC 关闭"
-                     + (ShopPricing.CanEdit ? " · 按 T 调价" : string.Empty);
+        _hint.text = Localization.IsEnglish
+            ? $"Scroll to browse every item · click a card to buy · press {ModConfig.ShopKey.Value} or ESC to close"
+              + (ShopPricing.CanEdit ? " · press T to edit prices" : string.Empty)
+            : $"滚轮下滑浏览全部商品 · 点击卡片购买 · 按 {ModConfig.ShopKey.Value} 或 ESC 关闭"
+              + (ShopPricing.CanEdit ? " · 按 T 调价" : string.Empty);
     }
 
     private void SetPriceEditing(bool on)
@@ -521,7 +548,9 @@ public sealed class HextechShop : MonoBehaviour
             return true;
         }
 
-        return false;
+        // 点卡片本体（避开 − / ＋）：弹出输入框直接敲精确价，不用一颗颗点。
+        OpenPriceDialog(offer);
+        return true;
     }
 
     /// <summary>换上一份价格预设（或默认配置），然后刷新整屏 —— 价格、可买状态都会跟着变。</summary>
@@ -552,6 +581,210 @@ public sealed class HextechShop : MonoBehaviour
         ShopPricing.Set(offer.Id, current + delta, _state);
     }
 
+    // ────────────────────────── 单品调价输入框 ──────────────────────────
+    // 和界面其它部分一样全手绘 + 手算点击，不接 EventSystem：数字用 Input.inputString 收，
+    // 回车确认，右键 / 取消按钮 / 点空白处取消。这样不依赖游戏当前挂的是哪套输入模块，
+    // 也不用担心 TMP_InputField 拿不到键盘焦点。
+
+    /// <summary>搭建单品调价输入框（模态：暗色遮罩 + 居中面板），平时整组隐藏。</summary>
+    private void BuildPriceDialog(RectTransform panel)
+    {
+        _priceDialogRoot = UiFactory.Stretch(UiFactory.Node("PriceDialog", panel));
+        _priceDialogRoot.SetAsLastSibling();
+        _priceDialogRoot.gameObject.SetActive(false);
+
+        // 遮罩：挡住底下的卡片点击（点它 = 取消），也压暗整屏让弹窗浮起来。
+        _priceDialogBackdrop = UiFactory.Solid(_priceDialogRoot, UiFactory.Backdrop);
+        _priceDialogBackdrop.raycastTarget = true;
+
+        var box = UiFactory.Rounded(_priceDialogRoot, UiFactory.PanelBackground, 18);
+        _priceDialogBox = box.rectTransform;
+        _priceDialogBox.anchorMin = _priceDialogBox.anchorMax = new Vector2(0.5f, 0.5f);
+        _priceDialogBox.sizeDelta = new Vector2(470f, 250f);
+
+        _priceDialogTitle = UiFactory.Label(_priceDialogBox, string.Empty, 18f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
+        var titleRect = _priceDialogTitle.rectTransform;
+        titleRect.anchorMin = new Vector2(0.5f, 1f);
+        titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.anchoredPosition = new Vector2(0f, -22f);
+        titleRect.sizeDelta = new Vector2(430f, 26f);
+
+        var valueBox = UiFactory.Rounded(_priceDialogBox, UiFactory.PanelBackgroundLight, 12);
+        var valueRect = valueBox.rectTransform;
+        valueRect.anchorMin = new Vector2(0.5f, 1f);
+        valueRect.anchorMax = new Vector2(0.5f, 1f);
+        valueRect.anchoredPosition = new Vector2(0f, -58f);
+        valueRect.sizeDelta = new Vector2(390f, 72f);
+
+        _priceDialogValue = UiFactory.Label(valueRect, "0", 34f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
+        UiFactory.Stretch(_priceDialogValue.rectTransform, 12f, 8f, 12f, 8f);
+
+        var rangeHint = UiFactory.Label(
+            _priceDialogBox,
+            Localization.IsEnglish
+                ? "Range 1-999 · Enter to confirm · right-click / click outside to cancel"
+                : "范围 1 ~ 999 · 回车确认 · 右键或点空白处取消",
+            14f, TextAlignmentOptions.Center, UiFactory.TextMuted);
+        var rangeRect = rangeHint.rectTransform;
+        rangeRect.anchorMin = new Vector2(0.5f, 1f);
+        rangeRect.anchorMax = new Vector2(0.5f, 1f);
+        rangeRect.anchoredPosition = new Vector2(0f, -136f);
+        rangeRect.sizeDelta = new Vector2(430f, 20f);
+
+        (_priceDialogOkBackground, _priceDialogOkButton) = BuildDialogButton(
+            _priceDialogBox, Localization.IsEnglish ? "OK" : "确定",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(30f, 28f), UiFactory.Accent);
+        (_priceDialogCancelBackground, _priceDialogCancelButton) = BuildDialogButton(
+            _priceDialogBox, Localization.IsEnglish ? "Cancel" : "取消",
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-30f, 28f), UiFactory.PanelHighlight);
+    }
+
+    /// <summary>弹窗底部那种小按钮：锚点 / 轴心 / 位置都由调用方给，返回底色与命中矩形。</summary>
+    private static (Image Background, RectTransform Rect) BuildDialogButton(
+        RectTransform parent, string text, Vector2 anchor, Vector2 pivot, Vector2 position, Color color)
+    {
+        var rect = UiFactory.Rounded(parent, color, 12).rectTransform;
+        rect.anchorMin = rect.anchorMax = anchor;
+        rect.pivot = pivot;
+        rect.anchoredPosition = position;
+        rect.sizeDelta = new Vector2(150f, 44f);
+
+        var label = UiFactory.Label(rect, text, 18f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
+        UiFactory.Stretch(label.rectTransform);
+
+        return (rect.GetComponent<Image>(), rect);
+    }
+
+    /// <summary>打开输入框：预填当前生效价（改过的用改过的，没改过用默认基础价）。</summary>
+    private void OpenPriceDialog(ShopOffer offer)
+    {
+        _priceDialogOffer = offer;
+        _priceDialogBuffer = (ShopPricing.OverrideFor(offer.Id) ?? offer.BaseCost).ToString();
+        _priceDialogOpen = true;
+        _priceDialogRoot.gameObject.SetActive(true);
+        _priceDialogRoot.SetAsLastSibling();
+        _priceDialogTitle.text = Localization.IsEnglish
+            ? $"Set price · {offer.Title} (default {offer.BaseCost})"
+            : $"输入价格 · {offer.Title}（默认 {offer.BaseCost}）";
+    }
+
+    private void ClosePriceDialog()
+    {
+        if (!_priceDialogOpen && _priceDialogOffer == null)
+        {
+            return;
+        }
+
+        _priceDialogOpen = false;
+        _priceDialogOffer = null;
+        _priceDialogBuffer = string.Empty;
+
+        // Build() 可能还没跑（极端时序）：根节点为空就没什么可藏的。
+        if (_priceDialogRoot != null)
+        {
+            _priceDialogRoot.gameObject.SetActive(false);
+        }
+    }
+
+    private void ConfirmPriceDialog()
+    {
+        var offer = _priceDialogOffer;
+
+        if (offer == null)
+        {
+            ClosePriceDialog();
+            return;
+        }
+
+        if (int.TryParse(_priceDialogBuffer, out var price) && price >= 1)
+        {
+            ShopPricing.Set(offer.Id, price, _state);
+            HextechHud.Toast(Localization.T(
+                "「{0}」价格已设为 {1} 枚（默认 {2}）", offer.Title, Mathf.Clamp(price, 1, 999), offer.BaseCost));
+        }
+
+        ClosePriceDialog();
+        RefreshVisuals();
+    }
+
+    /// <summary>
+    /// 输入框打开期间独占这一帧的输入：收数字 / 退格 / 回车，处理按钮与遮罩点击，
+    /// 然后直接 return —— 外面的 ESC 关商店、T 切模式、数字快捷购买全都不许碰到。
+    /// </summary>
+    private void TickPriceDialog()
+    {
+        var mouse = (Vector2)Input.mousePosition;
+
+        foreach (var c in Input.inputString)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                // 首个 0 不占位（避免 0099 这种敲法），总长 3 位 = 天然封顶 999。
+                if (_priceDialogBuffer == "0")
+                {
+                    _priceDialogBuffer = c.ToString();
+                }
+                else if (_priceDialogBuffer.Length < 3)
+                {
+                    _priceDialogBuffer += c;
+                }
+            }
+            else if (c == '\b')
+            {
+                if (_priceDialogBuffer.Length > 0)
+                {
+                    _priceDialogBuffer = _priceDialogBuffer.Substring(0, _priceDialogBuffer.Length - 1);
+                }
+            }
+            else if (c == '\n' || c == '\r')
+            {
+                ConfirmPriceDialog();
+                return;
+            }
+        }
+
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            ClosePriceDialog();
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(1))
+        {
+            ClosePriceDialog();
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            if (RectTransformUtility.RectangleContainsScreenPoint(_priceDialogOkButton, mouse, null))
+            {
+                ConfirmPriceDialog();
+                return;
+            }
+
+            if (RectTransformUtility.RectangleContainsScreenPoint(_priceDialogCancelButton, mouse, null)
+                || !RectTransformUtility.RectangleContainsScreenPoint(_priceDialogBox, mouse, null))
+            {
+                ClosePriceDialog();
+                return;
+            }
+        }
+
+        // 悬停高亮 + 数值区（带闪烁光标）。
+        var hoverOk = RectTransformUtility.RectangleContainsScreenPoint(_priceDialogOkButton, mouse, null);
+        var hoverCancel = RectTransformUtility.RectangleContainsScreenPoint(_priceDialogCancelButton, mouse, null);
+        _priceDialogOkBackground.color = hoverOk
+            ? Color.Lerp(UiFactory.Accent, UiFactory.TextPrimary, 0.30f)
+            : UiFactory.Accent;
+        _priceDialogCancelBackground.color = hoverCancel
+            ? Color.Lerp(UiFactory.PanelHighlight, UiFactory.Accent, 0.45f)
+            : UiFactory.PanelHighlight;
+
+        var caret = (Time.unscaledTime % 1f) < 0.5f ? "|" : string.Empty;
+        _priceDialogValue.text = (string.IsNullOrEmpty(_priceDialogBuffer) ? "0" : _priceDialogBuffer) + caret;
+    }
+
     private void Update()
     {
         if (!IsOpen)
@@ -563,6 +796,14 @@ public sealed class HextechShop : MonoBehaviour
         // 底下的按钮上（两边都在自己的 Update 里读 GetMouseButtonDown），刚关掉弹层那一下也会穿过来。
         if (HextechPresetPicker.BlocksInput)
         {
+            return;
+        }
+
+        // 单品价格输入框开着时这一帧的输入全归它：不然敲 "t" 会被下面的 GetKeyDown(KeyCode.T)
+        // 读到，直接把调价模式退掉；数字键也会被当成「快捷买 1~9 号位」。
+        if (_priceDialogOpen)
+        {
+            TickPriceDialog();
             return;
         }
 
@@ -793,7 +1034,7 @@ public sealed class HextechShop : MonoBehaviour
         RebuildCards();
 
         _empty.gameObject.SetActive(_visible.Count == 0);
-        _empty.text = "这一类暂时没有商品";
+        _empty.text = Localization.T("这一类暂时没有商品");
 
         RefreshVisuals();
     }
@@ -818,6 +1059,20 @@ public sealed class HextechShop : MonoBehaviour
         {
             var offer = _visible[i];
             var card = _cards[i];
+
+            // 名字与档位每帧跟着语言走：切语言不用重开商店就换过来（文本没变时 TMP 不会重绘）。
+            if (card.Title.text != offer.DisplayTitle)
+            {
+                card.Title.text = offer.DisplayTitle;
+            }
+
+            var tagText = Localization.T(offer.Tag);
+
+            if (card.Tag.text != tagText)
+            {
+                card.Tag.text = tagText;
+            }
+
             var soldOut = _state != null && offer.SoldOut(_state);
             var available = _state != null && offer.Available(_state);
             var overridePrice = ShopPricing.OverrideFor(offer.Id);
@@ -841,7 +1096,9 @@ public sealed class HextechShop : MonoBehaviour
                     ? Color.Lerp(UiFactory.PanelHighlight, UiFactory.Accent, 0.30f + (0.35f * card.Hover))
                     : UiFactory.PanelHighlight;
 
-                card.Hint.text = overridePrice.HasValue ? $"已改价 · 默认 {offer.BaseCost}" : "默认价";
+                card.Hint.text = overridePrice.HasValue
+                    ? Localization.IsEnglish ? $"Custom price · Default {offer.BaseCost}" : $"已改价 · 默认 {offer.BaseCost}"
+                    : Localization.T("默认价");
                 card.Hint.color = UiFactory.TextMuted;
 
                 var stepColor = overridePrice.HasValue ? UiFactory.Accent : UiFactory.PanelBackgroundLight;
@@ -1021,7 +1278,7 @@ public sealed class HextechShop : MonoBehaviour
         UiFactory.Stretch(glyph.rectTransform);
         glyph.gameObject.SetActive(offer.Icon == null);
 
-        var title = UiFactory.Label(card, offer.Title, 24f, TextAlignmentOptions.Left, UiFactory.TextPrimary);
+        var title = UiFactory.Label(card, offer.DisplayTitle, 24f, TextAlignmentOptions.Left, UiFactory.TextPrimary);
         title.textWrappingMode = TextWrappingModes.NoWrap;
         title.overflowMode = TextOverflowModes.Ellipsis;
         title.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -1120,27 +1377,46 @@ public sealed class HextechShop : MonoBehaviour
             return;
         }
 
+        // 和「鬼魂 / 死亡 / 完全昏迷不积累代币」（HextechState.AccrueTokens）同一个口径：
+        // 这种状态下房主那边 Item.RequestPickup 会把货拒了（鬼魂收不到东西），
+        // 代币白扣还拿不到，所以直接拦下给提示，而不是让玩家莫名其妙丢币。
+        var local = _state.Character;
+
+        if (local != null && local.data != null && (local.data.dead || local.data.fullyPassedOut || local.IsGhost))
+        {
+            HextechHud.Toast(Localization.IsEnglish
+                ? "Can't buy while downed or a ghost — items can't reach you"
+                : "倒地 / 鬼魂状态下没法买东西：东西送不到你手上");
+            return;
+        }
+
         var offer = _visible[index];
 
         if (offer.SoldOut(_state))
         {
-            HextechHud.Toast($"{offer.Title}：整局只能买 {offer.MaxPerRun} 次，本局已经买过了");
+            HextechHud.Toast(Localization.IsEnglish
+                ? $"{offer.DisplayTitle}: can only be bought {offer.MaxPerRun} time(s) per run — already purchased"
+                : $"{offer.DisplayTitle}：整局只能买 {offer.MaxPerRun} 次，本局已经买过了");
             return;
         }
 
         if (!offer.Available(_state))
         {
-            HextechHud.Toast($"{offer.Title}：{offer.UnavailableToast}");
+            HextechHud.Toast($"{offer.DisplayTitle}: {offer.UnavailableToast}");
             return;
         }
 
         if (!offer.TryBuy(_state, out var rolls))
         {
-            HextechHud.Toast($"代币不足：{offer.Title} 需要 {offer.CostFor(_state)} 枚，当前 {HextechState.FormatTokens(_state.Tokens)} 枚");
+            HextechHud.Toast(Localization.IsEnglish
+                ? $"Not enough tokens: {offer.DisplayTitle} costs {offer.CostFor(_state)}, you have {HextechState.FormatTokens(_state.Tokens)}"
+                : $"代币不足：{offer.DisplayTitle} 需要 {offer.CostFor(_state)} 枚，当前 {HextechState.FormatTokens(_state.Tokens)} 枚");
             return;
         }
 
-        HextechHud.Toast($"已购买 {offer.Title}（-{offer.CostFor(_state)} 代币，剩 {HextechState.FormatTokens(_state.Tokens)}）");
+        HextechHud.Toast(Localization.IsEnglish
+            ? $"Purchased {offer.DisplayTitle} (-{offer.CostFor(_state)} tokens, {HextechState.FormatTokens(_state.Tokens)} left)"
+            : $"已购买 {offer.DisplayTitle}（-{offer.CostFor(_state)} 代币，剩 {HextechState.FormatTokens(_state.Tokens)}）");
 
         if (rolls != null && rolls.Count > 0 && HextechRoll.Instance != null)
         {

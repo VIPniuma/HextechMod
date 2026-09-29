@@ -83,40 +83,6 @@ internal static class HextechPatches
     };
 
     /// <summary>
-    /// 「机能零食」用：把身上每种负面状态各按「自己当前值」的比例削掉 <paramref name="ratio"/>。
-    /// 传 0.05 就是「每种各 -5%」，条越长扣掉的绝对值越多，永远扣不到 0（是相对削减，不是扣整条的 5%）。
-    /// <para>
-    /// 只走上面那张表和「坚韧之躯」同一套口径 —— 石化 / 蛛网 / 捕蝇草不算日常负面状态，
-    /// 它们各自由自己的词条处理（比如「我还有光」管石化）。
-    /// </para>
-    /// </summary>
-    internal static float ReduceHarmfulStatusesByRatio(CharacterAfflictions afflictions, float ratio)
-    {
-        if (afflictions == null || ratio <= 0f)
-        {
-            return 0f;
-        }
-
-        var total = 0f;
-
-        foreach (var statusType in HarmfulStatuses)
-        {
-            var current = afflictions.GetCurrentStatus(statusType);
-
-            if (current <= 0f)
-            {
-                continue;
-            }
-
-            var cut = current * ratio;
-            afflictions.SubtractStatus(statusType, cut);
-            total += cut;
-        }
-
-        return total;
-    }
-
-    /// <summary>
     /// 本地角色受到的负面状态积累按词条增减：
     /// 「坚韧之躯」每层 ×0.75，「玻璃体质」（负面词条）每层 ×1.25。
     /// 只在「本地自己的客户端」上改动，游戏自身会把结果同步给其他人，不会重复生效。
@@ -706,7 +672,7 @@ internal static class HextechPatches
                 return;
             }
 
-            HextechManager.Instance?.QueueChoice("点燃篝火 · 选择一项海克斯强化", 3f);
+            HextechManager.Instance?.QueueChoice("点燃篝火 · 选择一项海克斯强化", 3f, campfire: true);
         }
     }
 }

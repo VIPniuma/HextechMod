@@ -8,40 +8,20 @@
     <!-- This is the display name of your mod. -->
     <AssemblyTitle>HextechMod</AssemblyTitle>
     <!-- The version number for your assembly, BepInEx plugin, and Thunderstore package. -->
-    <Version>0.3.51</Version>
+    <Version>0.3.86</Version>
     <RootNamespace>PeakModder.HextechMod</RootNamespace>
   </PropertyGroup>
 
-  <!-- ThunderPipe properties -->
-  <PropertyGroup>
-    <IsThunderstorePackable>true</IsThunderstorePackable>
-    <ThunderstoreName>HextechMod</ThunderstoreName>
-    <ThunderstoreDescription>PEAK 海克斯强化模组：登岛与每次篝火点燃后各来一次「局内 3 选 1」，选定立即生效、可叠加，共 80+ 条海克斯词条（含主动技能、能量、代币商店与行李箱开箱抽奖）。作者QQ：1330144749，反馈群：734080790</ThunderstoreDescription>
-    <ThunderstoreCommunities>peak</ThunderstoreCommunities>
-    <ThunderstoreCategories>mods</ThunderstoreCategories>
-  </PropertyGroup>
-
   <!--
-    Define mod files to copy to the relative BepInEx directory after build
-    and where they are packed to when building a Thunderstore package
+    Define mod files to copy to the relative BepInEx directory after build.
+    （不再打包/上传雷霆商店：ThunderPipe 打包配置已于 2026-09-16 移除，只保留本地部署。）
   -->
   <ItemGroup>
     <ModFile Include="$(TargetPath)" Destination="plugins/" />
   </ItemGroup>
 
-  <!-- 技能图标：game-icons.net（CC BY 3.0），打包时嵌入 dll，保持单文件分发。 -->
+  <!-- 技能图标：game-icons.net（CC BY 3.0），构建时嵌入 dll，保持单文件分发。 -->
   <ItemGroup>
     <EmbeddedResource Include="Assets\Icons\*.png" />
-  </ItemGroup>
-
-  <!-- Thunderstore package metadata -->
-  <ItemGroup>
-    <ThunderstorePackageFile Include="$(SolutionRoot)README.md" />
-    <ThunderstorePackageFile Include="$(SolutionRoot)CHANGELOG.md" />
-    <!-- 雷霆商店要求包根目录必须有 icon.png（商品页封面用，游戏里不读）。 -->
-    <ThunderstorePackageFile Include="$(SolutionRoot)icon.png" />
-    <ThunderstorePackageFile Include="$(SolutionRoot)LICENSE" />
-
-    <ThunderstoreDependency Include="BepInEx-BepInExPack_PEAK" Version="5.4.75301" />
   </ItemGroup>
 </Project>

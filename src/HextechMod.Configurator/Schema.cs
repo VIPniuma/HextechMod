@@ -45,42 +45,35 @@ internal static class Schema
                 F("HextechState.MaxSkillHextechs", "技能海克斯上限", 1, 5, 1, 1, isInt: true)),
 
             M("漂浮", "技能解锁词条",
-                F("SkillRegistry.SuperJumpEnergy", "能量", 5, 100, 5, 30),
                 F("SkillRegistry.SuperJumpCooldown", "冷却(秒)", 3, 180, 1, 8),
                 F("SkillRegistry.SuperJumpHungerCost", "饥饿代价(点)", 0, 50, 1, 10)),
 
             M("疾风步", "技能解锁词条",
-                F("SkillRegistry.SprintEnergy", "能量", 5, 100, 5, 35),
                 F("SkillRegistry.SprintCooldown", "冷却(秒)", 3, 180, 1, 30),
                 F("SkillRegistry.SprintDurationSeconds", "无限耐力(秒)", 1, 30, 1, 5),
                 F("SkillRegistry.SprintHungerCost", "饥饿代价(点)", 0, 50, 1, 10)),
 
             M("净化", "技能解锁词条 · 寒冷固定额外清 50%",
-                F("SkillRegistry.CleanseEnergy", "能量", 5, 100, 5, 60),
                 F("SkillRegistry.CleanseCooldown", "冷却(秒)", 3, 300, 1, 60),
                 F("SkillRegistry.CleansePercentPerStatus", "普通负面清除比例(0.1=10%)", 0, 0.5, 0.01, 0.1)),
 
             M("治疗波", "技能解锁词条",
-                F("SkillRegistry.HealEnergy", "能量", 5, 100, 5, 45),
                 F("SkillRegistry.HealCooldown", "冷却(秒)", 3, 300, 1, 120),
                 F("SkillRegistry.HealInjuryPoints", "回伤(点)", 1, 100, 1, 15),
                 F("SkillRegistry.HealPetrifyCostPoints", "石化代价(点)", 0, 50, 1, 5)),
 
             M("肾上腺素", "技能解锁词条",
-                F("SkillRegistry.AdrenalineEnergy", "能量", 5, 100, 5, 40),
                 F("SkillRegistry.AdrenalineCooldown", "冷却(秒)", 3, 300, 1, 60),
                 F("SkillRegistry.AdrenalineDurationSeconds", "加速时长(秒)", 1, 30, 1, 12),
                 F("SkillRegistry.AdrenalineMoveSpeedMod", "加速幅度", 0, 1, 0.05, 0.5),
                 F("SkillRegistry.AdrenalineHungerCost", "饥饿代价(点)", 0, 50, 1, 15)),
 
             M("无敌", "技能解锁词条",
-                F("SkillRegistry.InvincibleEnergy", "能量", 5, 200, 5, 80),
                 F("SkillRegistry.InvincibleCooldown", "冷却(秒)", 3, 300, 1, 45),
                 F("SkillRegistry.InvincibleDurationSeconds", "无敌时长(秒)", 1, 30, 1, 6),
                 F("SkillRegistry.InvinciblePetrifyCost", "石化代价(点)", 0, 50, 1, 5)),
 
             M("机械手", "技能解锁词条",
-                F("SkillRegistry.MechanicalHandEnergy", "能量", 5, 100, 5, 45),
                 F("SkillRegistry.MechanicalHandCooldown", "冷却(秒)", 3, 300, 1, 60),
                 F("HextechAdvancedPatches.MechanicalHand.ExtraDistance", "伸长距离(米)", 1, 20, 1, 5),
                 F("HextechAdvancedPatches.MechanicalHand.PetrifyCostPoints", "石化代价(点)", 0, 50, 1, 5)),
@@ -96,9 +89,6 @@ internal static class Schema
 
             M("长跑运动员", "冲刺消耗",
                 F("DefaultHextechs.MarathonerSprintFactorPerStack", "冲刺耗体系数", 0.5, 1, 0.05, 0.8)),
-
-            M("机能零食", "拾起削减负面",
-                F("DefaultHextechs.SnackReduceRatioPerStack", "单层削减比例", 0.01, 0.2, 0.01, 0.05)),
 
             M("皮糙肉厚", "伤势积累减免",
                 F("DefaultHextechs.ThickHidePerStack", "积累系数", 0.5, 1, 0.01, 0.75)),

@@ -215,7 +215,10 @@ public sealed class HextechCodex : MonoBehaviour
 
         var hextechs = 0;
 
-        for (var i = 0; i < state.Owned.Count && hextechs < HextechState.MaxNormalHextechs; i++)
+        // ⚠ 显示必须**如实全列**（2026-09-20）：拿取上限（MaxNormalHextechs）会被行李箱抽奖等
+        // 路径绕过，实际持有会超过 4 条；按获得顺序只画前 4 条 = 后抽到的负面词条永远看不见
+        //（700629 玩家 7 条词条里 3 条负面全被截掉）。行宽有自适应缩放，卡多就变小，但都能看到。
+        for (var i = 0; i < state.Owned.Count; i++)
         {
             var entry = state.Owned[i];
 
@@ -248,11 +251,12 @@ public sealed class HextechCodex : MonoBehaviour
 
     private void RebuildCards(HextechState state)
     {
-        // 收集这一次要展示的卡片：先技能，后普通海克斯。
+        // 收集这一次要展示的卡片：先技能，后普通海克斯。**全列**——显示不套持有上限，
+        // 否则后抽到的负面词条永远排不进来（见 ComputeSignature 的注释）。
         var skills = state.Skills;
         var hextechs = new List<HextechEntry>();
 
-        for (var i = 0; i < state.Owned.Count && hextechs.Count < HextechState.MaxNormalHextechs; i++)
+        for (var i = 0; i < state.Owned.Count; i++)
         {
             var entry = state.Owned[i];
 
@@ -320,12 +324,12 @@ public sealed class HextechCodex : MonoBehaviour
                 var cd = state.CooldownRemaining;
 
                 card.Title.text = definition.Title;
-                card.Rarity.text = "主动技能";
+                card.Rarity.text = Localization.T("主动技能");
                 card.Rarity.color = color;
                 card.Description.text = definition.Description;
                 card.Effect.text = cd > 0.05f
-                    ? $"冷却 {cd:0.0}s · 耗能 {definition.EnergyCost:0} · 按 {ModConfig.SkillKey.Value} 释放"
-                    : $"就绪 · 耗能 {definition.EnergyCost:0} · 按 {ModConfig.SkillKey.Value} 释放";
+                    ? $"冷却 {cd:0.0}s · 按 {ModConfig.SkillKey.Value} 释放"
+                    : $"就绪 · 按 {ModConfig.SkillKey.Value} 释放";
 
                 card.Strip.color = color;
                 card.BadgeGlyph.gameObject.SetActive(false);
@@ -344,8 +348,15 @@ public sealed class HextechCodex : MonoBehaviour
                 card.Title.text = entry.Title;
                 card.Rarity.text = UiFactory.QualityName(entry.Quality) + (stacks > 1 ? $" ×{stacks}" : "");
                 card.Rarity.color = color;
+                // 描述里不含 {0} 的词条（四条新负面、以及所有写死数值的），
+                // Summary(stacks) 和 Description 是同一句话 —— 那就别再挂一行「效果：」重复一遍
+                //（2026-09-20：玩家反馈图鉴里介绍与效果一模一样）。
+                var summary = entry.Summary(stacks);
+
                 card.Description.text = entry.Description;
-                card.Effect.text = "效果：" + entry.Summary(stacks);
+                card.Effect.text = summary == entry.Description
+                    ? string.Empty
+                    : Localization.T("效果：") + summary;
 
                 card.Strip.color = color;
                 card.BadgeGlyph.gameObject.SetActive(true);

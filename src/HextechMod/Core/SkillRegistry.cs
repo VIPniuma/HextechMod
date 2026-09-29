@@ -19,11 +19,9 @@ public sealed class SkillDefinition
 {
     public SkillId Id { get; }
 
-    public string Title { get; }
+    public string Title => Localization.T(_title);
 
-    public string Description { get; }
-
-    public float EnergyCost { get; }
+    public string Description => Localization.SkillDescription(_title, _description);
 
     public float Cooldown { get; }
 
@@ -34,7 +32,11 @@ public sealed class SkillDefinition
     public bool CooldownOnConsume { get; }
 
     /// <summary>前置判定没过时给玩家的一句提示（空字符串 = 静默当作没按）。</summary>
-    public string BlockedHint { get; }
+    public string BlockedHint => Localization.T(_blockedHint);
+
+    private readonly string _title;
+    private readonly string _description;
+    private readonly string _blockedHint;
 
     private readonly Action<Character> _cast;
     private readonly Func<Character, bool>? _canCast;
@@ -43,7 +45,6 @@ public sealed class SkillDefinition
         SkillId id,
         string title,
         string description,
-        float energyCost,
         float cooldown,
         Action<Character> cast,
         bool cooldownOnConsume = false,
@@ -51,14 +52,13 @@ public sealed class SkillDefinition
         string blockedHint = "")
     {
         Id = id;
-        Title = title;
-        Description = description;
-        EnergyCost = energyCost;
+        _title = title;
+        _description = description;
         Cooldown = cooldown;
         _cast = cast;
         CooldownOnConsume = cooldownOnConsume;
         _canCast = canCast;
-        BlockedHint = blockedHint;
+        _blockedHint = blockedHint;
     }
 
     /// <summary>现在能不能放。没写前置判定的一律能放。</summary>
@@ -76,27 +76,20 @@ public sealed class SkillDefinition
 /// <summary>
 /// 海克斯主动技能表。全部只作用于本地玩家。
 /// <para>
-/// 所有数值（能量 / 冷却 / 时长 / 代价）都是 <c>public static</c> 字段 —— 服务器平衡配置
+/// 所有数值（冷却 / 时长 / 代价）都是 <c>public static</c> 字段 —— 服务器平衡配置
 /// （<see cref="BalanceConfig"/>）会在技能注册**之前**按「类名.字段名」反射覆盖，
 /// 所以微调数值不用发新版。下面的说明文字全部用插值引用同一份字段，配置生效后描述自动跟着变。
 /// </para>
 /// </summary>
 public static class SkillRegistry
 {
-    // ── 能量 / 冷却（肾上腺素 2026-09-14：22 → 60 秒，用户定的）──
-    public static float SuperJumpEnergy = 30f;
+    // ── 冷却（肾上腺素 2026-09-14：22 → 60 秒，用户定的；能量系统 2026-09-16 整个删除）──
     public static float SuperJumpCooldown = 8f;
-    public static float SprintEnergy = 35f;
     public static float SprintCooldown = 30f;
-    public static float CleanseEnergy = 60f;
     public static float CleanseCooldown = 60f;
-    public static float HealEnergy = 45f;
     public static float HealCooldown = 120f;
-    public static float AdrenalineEnergy = 40f;
     public static float AdrenalineCooldown = 60f;
-    public static float InvincibleEnergy = 80f;
     public static float InvincibleCooldown = 45f;
-    public static float MechanicalHandEnergy = 45f;
     public static float MechanicalHandCooldown = 60f;
 
     // ── 数值 / 代价（饥饿 / 石化代价一律用「点」，1 点 = 0.01 条；使用处自己乘 StatusPoint）──
@@ -151,7 +144,6 @@ public static class SkillRegistry
             SkillId.SuperJump,
             "海克斯漂浮",
             $"短暂进入低重力漂浮状态，朝视线方向轻盈飘起；代价是使用后立刻增加 {SuperJumpHungerCost:0} 点饥饿值。",
-            SuperJumpEnergy,
             SuperJumpCooldown,
             character =>
             {
@@ -171,7 +163,6 @@ public static class SkillRegistry
             SkillId.Sprint,
             "疾风步",
             $"{SprintDurationSeconds:0} 秒内耐力无限，奔跑与攀爬不再消耗体力；代价是使用后立刻涨一截饥饿。",
-            SprintEnergy,
             SprintCooldown,
             character =>
             {
@@ -196,7 +187,6 @@ public static class SkillRegistry
             "净化",
             $"清除自身每个负面状态当前值的 {CleansePercentPerStatus * 100f:0.#}%（寒冷额外清除 {CleanseColdPercent * 100f:0.#}%）；"
             + "实际消除多少，就立刻转成多少饥饿值（清得越多越饿）。",
-            CleanseEnergy,
             CleanseCooldown,
             character =>
             {
@@ -242,7 +232,6 @@ public static class SkillRegistry
             "治疗波",
             $"立即恢复 {HealInjuryPoints:0} 点受伤值（只回伤势，不治疗其他负面状态）。"
             + $"代价：立刻增加 {HealPetrifyCostPoints:0} 点石化值。",
-            HealEnergy,
             HealCooldown,
             character =>
             {
@@ -268,7 +257,6 @@ public static class SkillRegistry
             "肾上腺素",
             $"{AdrenalineDurationSeconds:0} 秒内大幅提升移动速度与攀爬速度，且不会犯困；"
             + $"代价是使用后立刻透支 {AdrenalineHungerCost / DefaultHextechs.StatusPoint:0} 点饥饿值。",
-            AdrenalineEnergy,
             AdrenalineCooldown,
             character =>
             {
@@ -296,7 +284,6 @@ public static class SkillRegistry
             "无敌",
             $"{InvincibleDurationSeconds:0} 秒内免疫一切伤害与负面状态；"
             + $"代价是立刻增加 {InvinciblePetrifyCost:0} 点石化值。",
-            InvincibleEnergy,
             InvincibleCooldown,
             character =>
             {
@@ -318,14 +305,13 @@ public static class SkillRegistry
 
         // 机械手（原「磁力手」）：唯一一个「延后冷却」的技能 ——
         // 按下先把手伸长，成功交互一次才复原并开始冷却，所以用 canCast 挡住就绪期间的第二次按下，
-        // 免得白扣能量和石化。数值见 HextechAdvancedPatches.MechanicalHand。
+        // 免得白扣一次石化。数值见 HextechAdvancedPatches.MechanicalHand。
         Register(new SkillDefinition(
             SkillId.MechanicalHand,
             "机械手",
             $"立刻把交互距离拉长 {HextechAdvancedPatches.MechanicalHand.ExtraDistance:0} 米，"
             + "成功交互一次后自动复原并开始冷却。"
             + $"代价：立刻增加 {HextechAdvancedPatches.MechanicalHand.PetrifyCostPoints:0} 点石化值。",
-            MechanicalHandEnergy,
             MechanicalHandCooldown,
             character => HextechAdvancedPatches.MechanicalHand.Arm(character),
             cooldownOnConsume: true,

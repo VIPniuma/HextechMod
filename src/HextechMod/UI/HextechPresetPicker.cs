@@ -542,7 +542,7 @@ internal sealed class HextechPresetPicker : MonoBehaviour
 
         if (PricePresets.Remove(name))
         {
-            HextechHud.Toast($"已删除预设「{name}」");
+            HextechHud.Toast(Localization.T("已删除预设「{0}」", name));
         }
 
         _pendingDelete = -1;
@@ -758,7 +758,7 @@ internal sealed class HextechPresetPicker : MonoBehaviour
 
             var pending = i == _pendingDelete;
 
-            item.RemoveLabel.text = pending ? "确认" : "删除";
+            item.RemoveLabel.text = pending ? Localization.T("确认") : Localization.T("删除");
             item.RemoveLabel.color = pending
                 ? UiFactory.PanelBackground
                 : (i == _hoverRemove ? UiFactory.TextPrimary : UiFactory.TextMuted);

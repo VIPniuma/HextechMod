@@ -36,10 +36,10 @@ internal static class ItemPricing
     /// 和最初那一版（4 / 7 / 12 / 18 / 28 / 45 / 70）比：底下两档各抬 1 枚
     /// （普通物资以前 4 枚就能买一件，比一次抽奖还便宜，商店等于白送），
     /// 稀有及以上整体下调 —— 一局也就几十枚代币，70 枚一件的价签等于「买不到」。
-    /// 除了「很有用却很便宜」的功能道具（见下面 <see cref="Rules"/>），整店只降不涨。
+    /// 2026-09-16 应反馈全店涨价四倍：整张基准表 ×4（{5,8,12,16,20,24,30} → 现值）。
     /// </para>
     /// </summary>
-    private static readonly int[] RarityBase = { 5, 8, 12, 16, 20, 24, 30 };
+    private static readonly int[] RarityBase = { 20, 32, 48, 64, 80, 96, 120 };
 
     /// <summary>没有特殊功能的食物按基准价的这个比例卖：最常见、也最不缺的补给。</summary>
     private const float FoodDiscount = 0.8f;
@@ -49,7 +49,7 @@ internal static class ItemPricing
     /// 稀有度只说明「这东西刷出来的概率」，说不清「它能顶多少饥饿」——
     /// 一颗传说档的果子按稀有度算下来比一捆绳子还贵，谁看了都觉得虚高，所以一律按住。
     /// </summary>
-    private const int FoodCap = 12;
+    private const int FoodCap = 48;
 
     /// <summary>个体微调的上下限（按 prefab 名算，稳定、各端一致）。</summary>
     private const float TweakMin = 0.88f;
@@ -96,18 +96,18 @@ internal static class ItemPricing
     {
         // ── 点名单价：作用配不上稀有度价的几件 ───────────────────────
 
-        // 滑翔翼：能飞，但多数时候没有绳子 / 踏板菇好使，按稀有度算下来 30 往上，玩家反馈虚高。
+        // 滑翔翼：能飞，但多数时候没有绳子 / 踏板菇好使（顶价随全店 ×4：22 → 88）。
         new Rule(
             "位移·滑翔翼",
             0,
-            22,
+            88,
             item => Has<Glider>(item)),
 
-        // 一束气球：一次性载具，按住位移类的一半。
+        // 一束气球：一次性载具（2026-09-16 先按反馈翻倍 15 → 30，同日全店 ×4：30 → 120）。
         new Rule(
             "位移·气球",
             0,
-            15,
+            120,
             item => Has<Balloon>(item)),
 
         // ── 大类 ─────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ internal static class ItemPricing
         // 气球与滑翔翼已经被上面两条按住，这里保留它们只是为了把「这一类包含什么」写全。
         new Rule(
             "位移",
-            30,
+            120,
             0,
             item => Has<RopeSpool>(item)
                 || Has<RopeTier>(item)
@@ -137,14 +137,14 @@ internal static class ItemPricing
         // 一次就能把整队从团灭边缘拉回来。
         new Rule(
             "救援",
-            30,
+            120,
             0,
             item => Has<Peak.AmuletBase>(item) || Has<RescueHook>(item)),
 
         // 容量与续航：多背一件东西、多一截体力，整局都在吃收益。
         new Rule(
             "容量",
-            25,
+            100,
             0,
             item => item is Backpack
                 || Has<MagicBugle>(item)
@@ -153,7 +153,7 @@ internal static class ItemPricing
         // 光源与破坏：黑的地方能看见路、挡路的东西能拆开。
         new Rule(
             "光源",
-            20,
+            80,
             0,
             item => Has<Lantern>(item)
                 || Has<Flare>(item)

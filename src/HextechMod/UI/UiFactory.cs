@@ -59,13 +59,13 @@ internal static class UiFactory
 
     public static string QualityName(HextechQuality quality)
     {
-        return quality switch
+        return Localization.T(quality switch
         {
             HextechQuality.Legendary => "传说",
             HextechQuality.Gold => "黄金",
             HextechQuality.Silver => "白银",
             _ => "青铜",
-        };
+        });
     }
 
     /// <summary>品质徽章上用的符号，避免为每个品质准备贴图。</summary>
@@ -322,7 +322,7 @@ internal static class UiFactory
         var rect = Node("Label", parent);
         var label = rect.gameObject.AddComponent<TextMeshProUGUI>();
         label.font = ResolveFont();
-        label.text = text;
+        label.text = Localization.T(text);
         label.fontSize = size;
         label.alignment = alignment;
         label.color = color;

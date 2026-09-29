@@ -30,7 +30,6 @@ internal static class DefaultHextechs
     public const string ToughBodyId = "tough_body";
     public const string GlassyId = "glassy";
     public const string LuckyLuggageId = "lucky_luggage";
-    public const string SnackId = "snack";
     public const string TarzanId = "tarzan";
     public const string ThickHideId = "thick_hide";
     public const string AntidoteBodyId = "antidote_body";
@@ -77,24 +76,6 @@ internal static class DefaultHextechs
     /// 只留 1% 的余量到倒地线，所以不会当场昏迷，但一点伤就会倒。
     /// </summary>
     public static float HangedManInjuryRatio = 0.99f;
-
-    /// <summary>
-    /// 机能零食：每件物品把「每种负面状态」按各自当前值削掉的**单层**比例。
-    /// 是相对削减（0.05 = 每种各 -5%，条越长扣得越多），不是扣整条状态条的 5%。
-    /// </summary>
-    public static float SnackReduceRatioPerStack = 0.05f;
-
-    /// <summary>
-    /// 机能零食叠了 <paramref name="stacks"/> 层时的累计削减比例 —— 与品质词条同一套乘法口径：
-    /// 5% 后再得 5% → 5% + 5%×5% = 5.25%，即 0.05 × 1.05^(n-1)。
-    /// （2026-09-13 之前是每层线性再叠一份 5%，三层 15% 偏超标。）
-    /// </summary>
-    public static float SnackTotalRatio(int stacks)
-    {
-        return stacks <= 0
-            ? 0f
-            : SnackReduceRatioPerStack * Mathf.Pow(1f + SnackReduceRatioPerStack, stacks - 1);
-    }
 
     /// <summary>
     /// 说明里「一点」的口径：状态条内部值的 1%。
@@ -182,6 +163,9 @@ internal static class DefaultHextechs
 
         // 需要盯游戏事件的特殊机制词条（领头羊 / 拉拉手 / 厨师 / 背包客 / 我还有光 …）
         AdvancedHextechs.Register();
+
+        // 第三批：四条明坑的负面词条 + 会改造三选一的「纯氧」（天之弃子 / 急性铁中毒 / 黄毛追求者 / 纯氧）。
+        CurseHextechs.Register();
     }
 
     // ── 青铜（8%）───────────────────────────────────────────────
@@ -230,24 +214,13 @@ internal static class DefaultHextechs
 
         // 「拾荒者」：每件物品第一次被拾起时给 0.3 枚代币（小数累计）。
         // 2026-09-16 从 +1 削弱到 +0.3：PEAK 里散落物品极多，+1/件等于白嫖几十枚、商店变免费。
-        // 去重和「烫手 / 机能零食」共用 TryMarkPickupSettled（按物品实例记，
+        // 去重和「烫手」共用 TryMarkPickupSettled（按物品实例记，
         // 丢了再捡起来不会重复给）。不设每局上限（2026-09-12 按玩家要求去掉原来的 20 枚上限）。
         Register(new ActionHextech(
             ScavengerId,
             "拾荒者",
             "每件物品第一次被你拾起时 +0.3 枚商店代币（小数累计、不设上限，捡多少给多少；丢了再捡不会重复给）。",
             quality));
-
-        // 每件物品第一次被拾起时吃一口：身上「每种负面状态」各按自己当前值 -5%。
-        // 是相对削减，条越长扣得越多、永远扣不到 0；同一件物品拿进拿出、丢了再捡都不会再来一次。
-        // 叠层走乘法口径（5% → 5.25% → 5.51%），见 SnackTotalRatio —— 2026-09-13 从「每层再叠一份」的线性叠加改过来。
-        Register(new ActionHextech(
-            SnackId,
-            "机能零食",
-            "每件物品第一次被你拾起时，身上每种负面状态各减少当前值的 5%（每多一层按乘法再叠一点，同一件物品不会重复生效）。",
-            quality,
-            stackable: true,
-            maxStacks: 3));
 
         Register(new ActionHextech(
             "climber",
@@ -556,30 +529,30 @@ internal static class DefaultHextechs
             maxStacks: 2));
 
         // 技能本质是「进入低重力漂浮、朝视线方向轻盈飘起」，不是击飞/弹射（原名叫「海克斯：跳跃」）。
-        // 技能词条的说明统一带上「技能介绍 + 效果 + 能量 / 冷却」（2026-09-14 用户要求），
+        // 技能词条的说明统一带上「技能介绍 + 效果 + 冷却」（2026-09-14 用户要求；能量已删，只留冷却），
         // 全部插值引用 SkillRegistry 的静态字段 —— 服务器平衡配置改了数值，这里自动跟上。
         RegisterSkillUnlock("unlock_super_jump", "海克斯：漂浮",
             $"解锁主动技能「海克斯漂浮」：短暂进入低重力漂浮状态，朝视线方向轻盈飘起；"
             + $"代价是使用后立刻 +{SkillRegistry.SuperJumpHungerCost:0} 点饥饿值"
-            + $"（{SkillRegistry.SuperJumpEnergy:0} 能量 · {SkillRegistry.SuperJumpCooldown:0} 秒冷却）。",
+            + $"（{SkillRegistry.SuperJumpCooldown:0} 秒冷却）。",
             quality, SkillId.SuperJump);
         RegisterSkillUnlock("unlock_dash", "海克斯：疾风步",
             $"解锁主动技能「疾风步」：{SkillRegistry.SprintDurationSeconds:0} 秒内耐力无限，奔跑与攀爬不再耗体力；"
-            + $"用完立刻涨一截饥饿（{SkillRegistry.SprintEnergy:0} 能量 · {SkillRegistry.SprintCooldown:0} 秒冷却）。",
+            + $"用完立刻涨一截饥饿（{SkillRegistry.SprintCooldown:0} 秒冷却）。",
             quality, SkillId.Sprint);
         RegisterSkillUnlock("unlock_cleanse", "海克斯：净化",
             $"解锁主动技能「净化」：清除自身每个负面状态当前值的 {SkillRegistry.CleansePercentPerStatus * 100f:0.#}%（寒冷额外清除 {SkillRegistry.CleanseColdPercent * 100f:0.#}%）；"
-            + $"实际消除多少就转成多少饥饿值（{SkillRegistry.CleanseEnergy:0} 能量 · {SkillRegistry.CleanseCooldown:0} 秒冷却）。",
+            + $"实际消除多少就转成多少饥饿值（{SkillRegistry.CleanseCooldown:0} 秒冷却）。",
             quality, SkillId.Cleanse);
         RegisterSkillUnlock("unlock_heal", "海克斯：治疗波",
             $"解锁主动技能「治疗波」：立即恢复 {SkillRegistry.HealInjuryPoints:0} 点受伤值（只回伤势，不治疗其他负面状态）；"
             + $"代价是立刻 +{SkillRegistry.HealPetrifyCostPoints:0} 点石化值"
-            + $"（{SkillRegistry.HealEnergy:0} 能量 · {SkillRegistry.HealCooldown:0} 秒冷却）。",
+            + $"（{SkillRegistry.HealCooldown:0} 秒冷却）。",
             quality, SkillId.Heal);
         RegisterSkillUnlock("unlock_adrenaline", "海克斯：肾上腺素",
             $"解锁主动技能「肾上腺素」：{SkillRegistry.AdrenalineDurationSeconds:0} 秒内大幅提升移动与攀爬速度，且不会犯困；"
             + $"代价是使用后立刻透支 {SkillRegistry.AdrenalineHungerCost:0} 点饥饿值"
-            + $"（{SkillRegistry.AdrenalineEnergy:0} 能量 · {SkillRegistry.AdrenalineCooldown:0} 秒冷却）。",
+            + $"（{SkillRegistry.AdrenalineCooldown:0} 秒冷却）。",
             quality, SkillId.Adrenaline);
     }
 
@@ -673,7 +646,7 @@ internal static class DefaultHextechs
             "海克斯：无敌",
             $"解锁主动技能「无敌」：{SkillRegistry.InvincibleDurationSeconds:0} 秒内免疫一切伤害与负面状态；"
             + $"代价是使用时立刻 +{SkillRegistry.InvinciblePetrifyCost:0} 点石化值"
-            + $"（{SkillRegistry.InvincibleEnergy:0} 能量 · {SkillRegistry.InvincibleCooldown:0} 秒冷却）。",
+            + $"（{SkillRegistry.InvincibleCooldown:0} 秒冷却）。",
             quality,
             SkillId.Invincible,
             Cost(
@@ -738,7 +711,7 @@ internal static class DefaultHextechs
             "unlock_magnet",
             "海克斯：机械手",
             "解锁主动技能「机械手」：立刻把交互距离拉长 5 米，成功交互一次后自动复原并开始冷却；"
-            + "代价是按下那一刻 +5 点石化值（45 能量 · 交互后才计冷却）。",
+            + "代价是按下那一刻 +5 点石化值（交互后才计冷却）。",
             HextechQuality.Legendary,
             SkillId.MechanicalHand);
     }

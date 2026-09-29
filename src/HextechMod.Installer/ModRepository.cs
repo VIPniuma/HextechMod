@@ -61,7 +61,7 @@ internal sealed class RepoMod
 internal static class ModRepository
 {
     public const string MainModId = "hextechmod";
-    public const string MainModName = "海克斯 HEX";
+    public static string MainModName => InstallerLocalization.IsEnglish ? "Hextech HEX" : "海克斯 HEX";
 
     private const string RepositoryFileName = "repository.json";
     private const int TimeoutSeconds = 10;

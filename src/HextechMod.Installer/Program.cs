@@ -45,7 +45,7 @@ internal static class Program
 
         MessageBox.Show(
             exception.Message,
-            "小王同学模组安装器",
+            InstallerLocalization.T("小王同学模组安装器"),
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }

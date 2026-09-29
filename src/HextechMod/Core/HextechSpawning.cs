@@ -83,6 +83,26 @@ internal static class HextechSpawning
 
             if (item == null)
             {
+                // 童军雕像这类「场景物件」没有 Item 组件（捡不起来），实例化本身就是全部；
+                // 顺手用原版自己的 RPC 把雕像绑定成买家的石化形态（killedByDagger = false）。
+                var scout = go.GetComponent<Peak.PetrifiedScout>();
+
+                if (scout != null)
+                {
+                    var buyerView = giveTo == null || giveTo.refs == null ? null : giveTo.refs.view;
+
+                    if (buyerView != null)
+                    {
+                        go.GetComponent<PhotonView>()?.RPC(
+                            "RPC_SpawnPetrifiedScout",
+                            RpcTarget.AllBuffered,
+                            buyerView.OwnerActorNr,
+                            false);
+                    }
+
+                    continue;
+                }
+
                 HextechPlugin.Log.LogWarning($"生成物资失败：\"{names[i]}\" 的实例上没有 Item 组件。");
                 continue;
             }

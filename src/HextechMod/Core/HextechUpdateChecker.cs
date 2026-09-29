@@ -5,57 +5,69 @@ using UnityEngine;
 namespace PeakModder.HextechMod;
 
 /// <summary>
-/// 游戏刚打开（插件一加载，此时正好在主菜单）就查一次版本，有新版本就把更新提示推出来。
-///
-/// 不再等具体场景名：以前卡在「场景名 == Airport」才查，可机场就是主菜单，
-/// 一旦 PEAK 改了主菜单的场景名或加载时序，检测就整段失灵（玩家打开游戏也收不到提示）。
-/// 现在直接在插件启动后等菜单入场动画落定就查 —— 插件只在游戏启动时加载一次，
-/// 这一刻就是主菜单，等于「打开游戏就检测」，不用再进到机场。
-/// 只查一次（每次启动游戏算一次），失败就算了 —— 断网、服务器挂了都不该影响正常玩。
+/// 版本检测：进入菜单侧场景（主菜单 MainMenu / 机场大厅 Airport）时查一次更新服务器，
+/// 有新版本就把提示框推出来。
+/// <para>
+/// 触发点认场景沿：上一帧不在菜单侧、这一帧在菜单侧，才发起一次检测。注意必须是
+/// <see cref="HextechScene.InMenu"/> 而不是只有 Airport —— PEAK 的主菜单是独立的 MainMenu 场景，
+/// 玩家打开游戏停在主菜单时也要能收到提示（只认 Airport 的话不点「开始游戏」就永远不弹，
+/// 2026-09-16 就是栽在这上面）。局内退回大厅、换房间都会再次触发。
+/// 查失败（断网、服务器挂了）静默跳过，绝不影响正常进游戏。
+/// 已经被玩家「忽略此版本」的版本号不再提示（强制更新除外）。
+/// </para>
 /// </summary>
 public sealed class HextechUpdateChecker : MonoBehaviour
 {
-    /// <summary>启动后缓一下，让主菜单自己的入场动画先落定，别两层动画叠在一起。</summary>
-    private const float MenuSettleSeconds = 2f;
+    private bool _wasInMenu;
+    private bool _checking;
 
-    private void Start()
+    private void Update()
     {
-        StartCoroutine(Run());
+        var inMenu = ModConfig.Enabled.Value && HextechScene.InMenu;
+
+        if (inMenu && !_wasInMenu && !_checking)
+        {
+            StartCoroutine(Run());
+        }
+
+        _wasInMenu = inMenu;
     }
 
     private IEnumerator Run()
     {
-        if (!ModConfig.Enabled.Value || !ModConfig.CheckUpdateOnStart.Value)
+        _checking = true;
+
+        try
         {
-            yield break;
+            UpdateInfo? info = null;
+
+            yield return UpdateFeed.Fetch(i => info = i);
+
+            if (info == null || !UpdateFeed.IsNewer(info.Version, HextechPlugin.Version))
+            {
+                yield break;
+            }
+
+            if (!info.Force
+                && string.Equals(ModConfig.IgnoredUpdateVersion.Value.Trim(), info.Version, StringComparison.Ordinal))
+            {
+                HextechPlugin.Log.LogInfo($"[更新] v{info.Version} 已被玩家忽略，不再提示。");
+                yield break;
+            }
+
+            var prompt = HextechUpdatePrompt.Instance;
+
+            if (prompt == null)
+            {
+                yield break;
+            }
+
+            HextechPlugin.Log.LogInfo($"[更新] 发现新版本 v{info.Version}（当前 v{HextechPlugin.Version}）。");
+            prompt.Show(info);
         }
-
-        yield return new WaitForSecondsRealtime(MenuSettleSeconds);
-
-        UpdateInfo? info = null;
-
-        yield return UpdateFeed.Fetch(i => info = i);
-
-        if (info == null || !UpdateFeed.IsNewer(info.Version, HextechPlugin.Version))
+        finally
         {
-            yield break;
+            _checking = false;
         }
-
-        if (!info.Force
-            && string.Equals(ModConfig.IgnoredUpdateVersion.Value.Trim(), info.Version, StringComparison.Ordinal))
-        {
-            HextechPlugin.Log.LogInfo($"[更新] v{info.Version} 已被玩家忽略，本次不再提示。");
-            yield break;
-        }
-
-        var prompt = HextechUpdatePrompt.Instance;
-
-        if (prompt == null)
-        {
-            yield break;
-        }
-
-        HextechPlugin.Log.LogInfo($"[更新] 发现新版本 v{info.Version}（当前 v{HextechPlugin.Version}）。");
-        prompt.Show(info);
     }
 }

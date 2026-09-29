@@ -1,9 +1,11 @@
 using System;
 using System.Collections;
+using System.IO;
+using System.Net.Http;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace PeakModder.HextechMod;
 
@@ -45,7 +47,7 @@ public static class UpdateFeed
     /// 「没注入地址」就整段静默跳过（玩家本地跑自己编的 dll 时收不到任何提示）。
     /// 生产构建会通过程序集元数据注入同一个地址覆盖它，所以两者指向同一份 version.json。
     /// </summary>
-    private const string FallbackManifestUrl = "http://175.178.43.129/version.json";
+    private const string FallbackManifestUrl = "http://<你的服务器>/version.json";
 
     /// <summary>
     /// 内置更新源。优先用构建时注入的程序集元数据（值来自被 gitignore 的 Config.Build.user.props，
@@ -75,6 +77,29 @@ public static class UpdateFeed
     }
 
     private const int RequestTimeoutSeconds = 10;
+
+    /// <summary>
+    /// 共享的 .NET HTTP 客户端。
+    /// <para>
+    /// 刻意<b>不用</b> UnityWebRequest：PEAK 打包时「Allow downloads over HTTP」处于禁止状态，
+    /// 明文 http 的请求在 UnityWebRequest 里直接抛
+    /// <c>InvalidOperationException: Insecure connection not allowed</c>（且只进 Player.log，不进 BepInEx 日志）——
+    /// 2026-09-16 的版本检测就是这么「静默挂掉」的。HttpClient 走 .NET 自己的网络栈，不受这条限制。
+    /// UA 标成 HextechMod/&lt;版本&gt;，服务器日志里一眼就能认出游戏客户端的请求。
+    /// </para>
+    /// </summary>
+    private static readonly HttpClient Http = CreateClient();
+
+    private static HttpClient CreateClient()
+    {
+        var client = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(RequestTimeoutSeconds + 20),
+        };
+
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"HextechMod/{HextechPlugin.Version}");
+        return client;
+    }
 
     public static string ManifestUrl
     {
@@ -108,40 +133,162 @@ public static class UpdateFeed
             yield break;
         }
 
-        using (var request = UnityWebRequest.Get(url))
+        // 请求在后台线程跑（HttpClient 同步等会卡住主线程），协程每帧只看它完没完成。
+        // 用字节流 + 显式 UTF-8 解码：清单无 BOM，服务器响应头也未必标 charset，
+        // 交给 HTTP 库按默认猜编码的话，更新公告的中文会变成乱码。
+        byte[]? payload = null;
+        string? error = null;
+
+        var task = Task.Run(async () =>
         {
-            request.timeout = RequestTimeoutSeconds;
-
-            yield return request.SendWebRequest();
-
-            if (request.result != UnityWebRequest.Result.Success)
-            {
-                // 刻意不带 url：日志常被玩家贴出来求助，没必要顺手把服务器地址也发出去。
-                HextechPlugin.Log.LogInfo($"[更新] 版本清单获取失败（忽略）：{request.error}");
-                done(null);
-                yield break;
-            }
-
-            UpdateInfo? info = null;
-
             try
             {
-                info = Parse(request.downloadHandler.text);
+                payload = await Http.GetByteArrayAsync(url);
             }
             catch (Exception e)
             {
-                HextechPlugin.Log.LogWarning($"[更新] 版本清单解析失败：{e.Message}");
+                error = e.Message;
             }
+        });
 
-            if (info == null || info.Version.Length == 0)
-            {
-                HextechPlugin.Log.LogWarning("[更新] 版本清单里没有 version 字段，按「没有更新」处理。");
-                done(null);
-                yield break;
-            }
-
-            done(info);
+        while (!task.IsCompleted)
+        {
+            yield return null;
         }
+
+        if (payload == null)
+        {
+            // 刻意不带 url：日志常被玩家贴出来求助，没必要顺手把服务器地址也发出去。
+            HextechPlugin.Log.LogInfo($"[更新] 版本清单获取失败（忽略）：{error}");
+            done(null);
+            yield break;
+        }
+
+        var body = Encoding.UTF8.GetString(payload);
+        UpdateInfo? info = null;
+
+        try
+        {
+            info = Parse(body);
+        }
+        catch (Exception e)
+        {
+            HextechPlugin.Log.LogWarning($"[更新] 版本清单解析失败：{e.Message}");
+        }
+
+        if (info == null || info.Version.Length == 0)
+        {
+            HextechPlugin.Log.LogWarning("[更新] 版本清单里没有 version 字段，按「没有更新」处理。");
+            done(null);
+            yield break;
+        }
+
+        done(info);
+    }
+
+    /// <summary>清单同目录下的文件地址：dll 就摆在 version.json 旁边，拼一下就行。</summary>
+    public static string SiblingUrl(string fileName)
+    {
+        var base_ = ManifestUrl;
+        var cut = base_.LastIndexOf('/');
+
+        return (cut >= 0 ? base_.Substring(0, cut + 1) : string.Empty) + fileName;
+    }
+
+    /// <summary>
+    /// 下载新版 dll（游戏内自更新用）。成功回调整份文件内容（清单里带 SHA256 时先校验再回调），
+    /// 失败回调 null —— 由调用方弹提示。下载进度通过 <paramref name="progress"/> 逐帧上报（0~1）。
+    /// </summary>
+    public static IEnumerator DownloadDll(UpdateInfo info, Action<float> progress, Action<byte[]?> done)
+    {
+        var url = SiblingUrl(info.Dll);
+
+        if (string.IsNullOrWhiteSpace(info.Dll) || string.IsNullOrWhiteSpace(url))
+        {
+            done(null);
+            yield break;
+        }
+
+        // 流式下载才有进度条可画。下载进度在后台线程里记成浮点数，
+        // 协程每帧取最新值回调 —— Unity 的 UI 只能在主线程动，不能让后台线程直接碰。
+        byte[]? data = null;
+        string? error = null;
+        var downloaded = 0f;
+
+        var task = Task.Run(async () =>
+        {
+            try
+            {
+                using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    error = $"HTTP {(int)response.StatusCode}";
+                    return;
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var buffer = new MemoryStream();
+                var chunk = new byte[65536];
+                var total = response.Content.Headers.ContentLength ?? -1;
+                int read;
+
+                while ((read = await stream.ReadAsync(chunk, 0, chunk.Length)) > 0)
+                {
+                    buffer.Write(chunk, 0, read);
+
+                    if (total > 0)
+                    {
+                        downloaded = Mathf.Clamp01(buffer.Length / (float)total);
+                    }
+                }
+
+                data = buffer.ToArray();
+            }
+            catch (Exception e)
+            {
+                error = e.Message;
+            }
+        });
+
+        while (!task.IsCompleted)
+        {
+            progress(downloaded);
+            yield return null;
+        }
+
+        progress(1f);
+
+        if (data == null || data.Length == 0)
+        {
+            HextechPlugin.Log.LogWarning($"[更新] 新版 dll 下载失败（忽略）：{error ?? "内容为空"}");
+            done(null);
+            yield break;
+        }
+
+        if (info.Sha256.Length > 0 && !MatchesSha256(data, info.Sha256))
+        {
+            HextechPlugin.Log.LogWarning("[更新] 新版 dll 的 SHA256 和清单对不上，拒绝安装。");
+            done(null);
+            yield break;
+        }
+
+        done(data);
+    }
+
+    /// <summary>内容的 SHA256 和清单里的十六进制串是否一致（比较不看大小写）。</summary>
+    private static bool MatchesSha256(byte[] data, string expected)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(data);
+        var builder = new StringBuilder(hash.Length * 2);
+
+        foreach (var b in hash)
+        {
+            builder.Append(b.ToString("x2"));
+        }
+
+        return string.Equals(builder.ToString(), expected.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static UpdateInfo? Parse(string json)

@@ -10,7 +10,7 @@ internal static class PricePresetActions
     public static void Save(string name)
     {
         var replaced = PricePresets.Store(name);
-        HextechHud.Toast(replaced ? $"已更新预设「{name}」" : $"已保存为预设「{name}」");
+        HextechHud.Toast(replaced ? Localization.T("已更新预设「{0}」", name) : Localization.T("已保存为预设「{0}」", name));
     }
 
     /// <summary>应用一份预设；<paramref name="preset"/> 传 null 表示切回默认配置。</summary>
@@ -25,8 +25,8 @@ internal static class PricePresetActions
 
         PricePresets.Apply(preset, state);
 
-        var empty = preset.Prices.Count == 0 ? "（这份预设里没有改过单件价）" : string.Empty;
-        var host = ShopPricing.CanEdit ? string.Empty : " · 联机时价格以房主为准";
-        HextechHud.Toast($"已应用预设「{preset.Name}」{empty}{host}");
+        var empty = preset.Prices.Count == 0 ? Localization.T("（这份预设里没有改过单件价）") : string.Empty;
+        var host = ShopPricing.CanEdit ? string.Empty : Localization.T(" · 联机时价格以房主为准");
+        HextechHud.Toast(Localization.T("已应用预设「{0}」", preset.Name) + empty + host);
     }
 }

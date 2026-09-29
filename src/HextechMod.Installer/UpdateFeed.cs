@@ -20,7 +20,7 @@ internal sealed class RemoteRelease
     public string Notes = string.Empty;
 
     /// <summary>展示名（日志与进度条用）。version.json 没有名字字段，仓库条目会给。</summary>
-    public string Name = "模组";
+    public string Name = InstallerLocalization.T("模组");
 
     /// <summary>dll 的文件名或完整地址。</summary>
     public string DllUrl = string.Empty;
@@ -84,9 +84,11 @@ internal static class UpdateFeed
         }
 
         // 整条地址和单独的主机名都可能出现，两个都换掉。
+        var placeholder = InstallerLocalization.T("<更新源>");
+
         return text
-            .Replace(DefaultManifestUrl, "<更新源>")
-            .Replace(uri.Host, "<更新源>");
+            .Replace(DefaultManifestUrl, placeholder)
+            .Replace(uri.Host, placeholder);
     }
 
     /// <summary>拉取版本清单。失败一律返回 null，由调用方决定怎么报错。</summary>
@@ -108,7 +110,8 @@ internal static class UpdateFeed
 
             if (release == null || release.Version.Length == 0)
             {
-                throw new InvalidOperationException("版本清单里没有 version 字段。");
+                throw new InvalidOperationException(
+                    InstallerLocalization.T("版本清单里没有 version 字段。"));
             }
 
             return release;
@@ -146,8 +149,9 @@ internal static class UpdateFeed
                     received += count;
 
                     var text = total > 0
-                        ? $"下载模组 v{release.Version}… {received * 100 / total}%"
-                        : $"下载模组 v{release.Version}…";
+                        ? InstallerLocalization.Format(
+                            "下载模组 v{0}… {1}%", release.Version, received * 100 / total)
+                        : InstallerLocalization.Format("下载模组 v{0}…", release.Version);
 
                     progress?.Report(new InstallProgress(text, total > 0 ? 0.1 + (0.8 * received / total) : 0.4));
                 }
@@ -157,7 +161,7 @@ internal static class UpdateFeed
 
             if (bytes.Length == 0)
             {
-                throw new InvalidOperationException("服务器返回了空文件。");
+                throw new InvalidOperationException(InstallerLocalization.T("服务器返回了空文件。"));
             }
 
             if (!string.IsNullOrWhiteSpace(release.Sha256))
@@ -166,7 +170,8 @@ internal static class UpdateFeed
 
                 if (!string.Equals(actual, release.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException("下载的模组校验不通过（SHA256 不一致），已丢弃。");
+                    throw new InvalidOperationException(
+                        InstallerLocalization.T("下载的模组校验不通过（SHA256 不一致），已丢弃。"));
                 }
             }
 

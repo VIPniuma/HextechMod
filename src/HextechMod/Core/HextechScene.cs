@@ -21,8 +21,28 @@ internal static class HextechScene
 {
     private const string AirportSceneName = "Airport";
 
+    /// <summary>主菜单场景名（PEAK 的菜单不是机场：Pretitle → Title → MainMenu → Airport → 地图）。</summary>
+    private const string MainMenuSceneName = "MainMenu";
+
     /// <summary>当前活动场景是不是机场。</summary>
     public static bool InAirport => IsAirportScene(SceneManager.GetActiveScene().name);
+
+    /// <summary>
+    /// 当前活动场景是不是「菜单侧」（主菜单 <b>或</b> 机场大厅）。
+    /// <para>
+    /// 版本检测的触发点用这一个，不用 <see cref="InAirport"/>：玩家打开游戏停在主菜单（MainMenu）
+    /// 时也要能收到更新提示，只有 Airport 一个触发点的话，不点「开始游戏」就永远不弹（2026-09-16 实测踩坑）。
+    /// </para>
+    /// </summary>
+    public static bool InMenu
+    {
+        get
+        {
+            var sceneName = SceneManager.GetActiveScene().name;
+            return IsAirportScene(sceneName)
+                   || string.Equals(sceneName, MainMenuSceneName, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     /// <summary>
     /// 指定名字的场景是不是机场。给「拿不到活动场景」的地方用 —— 比如要判断**某个角色自己**在哪张图上

@@ -26,9 +26,17 @@ public sealed class HextechConfigPanel : MonoBehaviour
     private const float CardWidth = 1280f;
     private const float CardHeight = 880f;
 
-    private const float ViewportTop = 150f;
+    // 顶部给分类标签条腾出 60px：分类名直接摆在列表上方，点一下就跳页（不再用 ◀▶ 翻页按钮）。
+    private const float ViewportTop = 210f;
     private const float ViewportBottom = 150f;
     private const float ViewportHeight = CardHeight - ViewportTop - ViewportBottom;
+
+    /// <summary>分类标签条距卡片顶边的距离（上边 / 下边）。</summary>
+    private const float TabBarTop = 152f;
+    private const float TabBarBottom = 204f;
+
+    /// <summary>相邻两颗分类标签的间距。</summary>
+    private const float TabGap = 8f;
 
     private const float SidePadding = 40f;
     private const float RowHeight = 56f;
@@ -185,10 +193,16 @@ public sealed class HextechConfigPanel : MonoBehaviour
     private float[] _pageMin = Array.Empty<float>();
     private float[] _pageMax = Array.Empty<float>();
 
-    /// <summary>翻页导航条：上一页 / 下一页的点击区域，以及中间的「第 X/Y 页 · 分类名」。</summary>
-    private RectTransform _prevRect = null!;
-    private RectTransform _nextRect = null!;
-    private TextMeshProUGUI _pageTitle = null!;
+    /// <summary>顶部分类标签条的容器；具体每颗标签在 RecomputePages 数清页数后才建。</summary>
+    private RectTransform _tabBar = null!;
+
+    /// <summary>分类标签（三个列表一一对应）：点一下直接跳到那一页。</summary>
+    private readonly List<RectTransform> _tabRects = new();
+    private readonly List<Image> _tabBackgrounds = new();
+    private readonly List<TextMeshProUGUI> _tabLabels = new();
+
+    /// <summary>标签条签名（页数 + 各页标题）：没变就不重建，防每帧闪烁。</summary>
+    private string _tabSignature = string.Empty;
 
     /// <summary>往下列表的游标（从 0 往下走，所以是负数）；布局和追加新格都靠它。</summary>
     private float _cursor;
@@ -248,7 +262,9 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
         var subtitle = UiFactory.Label(
             card.transform,
-            "数值点右边的框直接输数字（回车生效）· 开关点一下切换、按键点一下再按新键 · ◀▶ 翻页看分类 · 商品调价在列表最下面",
+            Localization.IsEnglish
+                ? "Enter numeric values directly · Click toggles or keybinds · Use the tabs above to change category"
+                : "数值点右边的框直接输数字（回车生效）· 开关点一下切换、按键点一下再按新键 · 点上方分类直接跳页 · 商品调价在列表最下面",
             22f,
             TextAlignmentOptions.Center,
             UiFactory.TextMuted);
@@ -283,17 +299,14 @@ public sealed class HextechConfigPanel : MonoBehaviour
         hintRect.offsetMin = new Vector2(SidePadding, 76f);
         hintRect.offsetMax = new Vector2(-SidePadding, 132f);
 
-        // 翻页导航条：左下「上一页」、右下「下一页」、中间「第 X/Y 页 · 分类名」。
-        _prevRect = BuildNavButton(card.transform, SidePadding, "◀ 上一页", false);
-        _nextRect = BuildNavButton(card.transform, -SidePadding, "下一页 ▶", true);
-
-        _pageTitle = UiFactory.Label(card.transform, string.Empty, 22f, TextAlignmentOptions.Center, UiFactory.Accent);
-        var pageTitleRect = _pageTitle.rectTransform;
-        pageTitleRect.anchorMin = new Vector2(0.5f, 0f);
-        pageTitleRect.anchorMax = new Vector2(0.5f, 0f);
-        pageTitleRect.pivot = new Vector2(0.5f, 0f);
-        pageTitleRect.offsetMin = new Vector2(-220f, 12f);
-        pageTitleRect.offsetMax = new Vector2(220f, 66f);
+        // 顶部分类标签条的容器：分类名直接摆出来，点一下跳到那一页（取代旧版的 ◀▶ 翻页按钮）。
+        // 标签本体在 RecomputePages 数清页数之后才建 —— Build 这会儿还不知道有几页。
+        _tabBar = UiFactory.Node("TabBar", card.transform);
+        _tabBar.anchorMin = new Vector2(0f, 1f);
+        _tabBar.anchorMax = new Vector2(1f, 1f);
+        _tabBar.pivot = new Vector2(0.5f, 1f);
+        _tabBar.offsetMin = new Vector2(SidePadding, -TabBarBottom);
+        _tabBar.offsetMax = new Vector2(-SidePadding, -TabBarTop);
 
         // 说明有长有短（最长的一百多字），挤不下就自动缩一点，别把字裁掉。
         _hint.enableAutoSizing = true;
@@ -301,36 +314,6 @@ public sealed class HextechConfigPanel : MonoBehaviour
         _hint.fontSizeMax = 19f;
 
         _canvas.enabled = false;
-    }
-
-    /// <summary>翻页导航条上的一颗按钮（左下 / 右下）。</summary>
-    private static RectTransform BuildNavButton(Transform parent, float xEdge, string text, bool right)
-    {
-        var rect = UiFactory.Node(right ? "NextPage" : "PrevPage", parent);
-        rect.anchorMin = new Vector2(0f, 0f);
-        rect.anchorMax = new Vector2(0f, 0f);
-        rect.pivot = new Vector2(0f, 0f);
-
-        var width = 168f;
-
-        if (right)
-        {
-            rect.offsetMin = new Vector2(xEdge - width, 12f);
-            rect.offsetMax = new Vector2(xEdge, 66f);
-        }
-        else
-        {
-            rect.offsetMin = new Vector2(xEdge, 12f);
-            rect.offsetMax = new Vector2(xEdge + width, 66f);
-        }
-
-        var background = UiFactory.Rounded(rect, UiFactory.PanelHighlight, 10);
-        UiFactory.Stretch(background.rectTransform);
-
-        var label = UiFactory.Label(rect, text, 22f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
-        UiFactory.Stretch(label.rectTransform);
-
-        return rect;
     }
 
     public void Show()
@@ -353,8 +336,10 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
         var closeHint = ModConfig.ConfigPanelKey.Value == KeyCode.None
             ? "ESC"
-            : $"{ModConfig.ConfigPanelKey.Value} 或 ESC";
-        _defaultHint = $"滚轮浏览 · 数值点右边输入框直接敲（回车生效）· 开关、按键点一下 · 按 {closeHint} 关闭";
+            : Localization.IsEnglish ? $"{ModConfig.ConfigPanelKey.Value} or ESC" : $"{ModConfig.ConfigPanelKey.Value} 或 ESC";
+        _defaultHint = Localization.IsEnglish
+            ? $"Scroll to browse · Click values to edit · Press {closeHint} to close"
+            : $"滚轮浏览 · 数值点右边输入框直接敲（回车生效）· 开关、按键点一下 · 按 {closeHint} 关闭";
         _hint.text = _defaultHint;
 
         _canvas.enabled = true;
@@ -510,6 +495,13 @@ public sealed class HextechConfigPanel : MonoBehaviour
         var min = _pageCount > 0 ? _pageMin[_page] : 0f;
         var max = _pageCount > 0 ? _pageMax[_page] : 0f;
 
+        // 兜底：万一上下限又被算反了，宁可「这一页滚不动」，也绝不能让滚动在页首/页尾之间
+        // 每帧翻跟头（2026-09-26「调价页一闪一闪」的根因就是 clamp 收到 min > max）。
+        if (max < min)
+        {
+            max = min;
+        }
+
         // 正在输数值时不滚动：滚了以后输入框会从鼠标底下跑掉。
         if (_editing != null || max <= min + 0.01f)
         {
@@ -532,11 +524,17 @@ public sealed class HextechConfigPanel : MonoBehaviour
     {
         var mouse = (Vector2)Input.mousePosition;
 
-        // 翻页按钮：在视口外面，先拦下来，免得被下面的行命中逻辑吃掉。
+        // 顶部分类标签：在视口外面，先拦下来，免得被下面的行命中逻辑吃掉。
         if (Input.GetMouseButtonDown(0))
         {
-            if (Inside(_prevRect, mouse)) { PagePrev(); return; }
-            if (Inside(_nextRect, mouse)) { PageNext(); return; }
+            for (var i = 0; i < _tabRects.Count; i++)
+            {
+                if (Inside(_tabRects[i], mouse))
+                {
+                    SwitchPage(i);
+                    return;
+                }
+            }
         }
 
         // 输入框先看：编辑期间这一帧的鼠标归它管（点框里接着输，点别处先提交、这次点击照常生效）。
@@ -620,6 +618,20 @@ public sealed class HextechConfigPanel : MonoBehaviour
         }
 
         Apply(entry, rightClick ? -1 : 1);
+    }
+
+    /// <summary>
+    /// 语言改完值之后整个面板重建（几乎每一行文案都要跟着换，逐个刷新不如重建）。
+    /// </summary>
+    private void RebuildForLanguage()
+    {
+        ModConfig.Save();
+
+        var parent = transform.parent;
+        Hide();
+        var replacement = Create(parent);
+        replacement.Show();
+        Destroy(gameObject);
     }
 
     /// <summary>
@@ -719,7 +731,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
                 CultureInfo.InvariantCulture,
                 out var value))
         {
-            HextechHud.Toast($"「{text}」不是数字，这项没改");
+            HextechHud.Toast(Localization.T("「{0}」不是数字，这项没改", text));
             return;
         }
 
@@ -741,7 +753,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
     /// </summary>
     // ── 分页 ────────────────────────────────────────────────────
     //
-    // 配置项按分组（Section）分页：每个分组、日志上报、商店调价各占一页，底部用 ◀▶ 翻。
+    // 配置项按分组（Section）分页：每个分组、日志上报、商店调价各占一页，列表上方摆分类名直接点选。
     // 不再把所有配置堆在一页里上下滚。分页信息在行建好之后一次性算出来，翻页只切可见性 + 滚动范围。
 
     private void RecomputePages()
@@ -807,17 +819,25 @@ public sealed class HextechConfigPanel : MonoBehaviour
             _page = 0;
         }
 
-        if (_pageTitle != null)
-        {
-            _pageTitle.text = $"{PageName(_page)} · 第 {_page + 1}/{_pageCount} 页";
-        }
+        RebuildTabs();
+        RefreshTabs();
     }
 
     private void CommitPage(int page, float top, float bottom)
     {
         var height = bottom - top;
-        _pageMax[page] = Mathf.Max(0f, top);
-        _pageMin[page] = Mathf.Max(0f, top + height - ViewportHeight);
+
+        // 滚动值越大 = 看得越靠下。所以：页首 = 最小滚动，页尾 = 最大滚动。
+        // 内容比视口矮就滚不动 —— 这时最大滚动必须等于页首（取 Max），不能算成负数。
+        //
+        // ⚠⚠ 这两个数**绝对不能写反**。写反以后「比视口高的页」会出现 min > max，
+        // 而 Mathf.Clamp(_scroll, min, max) 在 min > max 时的行为是：
+        //   值偏页首 → value < min → 被弹成 min(页尾)；值偏页尾 → value > max → 又被弹回 max(页首)。
+        // 于是滚动位置**每帧在页首和页尾之间翻跟头**，玩家看到的就是「页面一闪一闪」。
+        // 只有比视口高的页会中招 —— 物资那几百行恰好是全场最高的一页，所以只有调价页在闪
+        // （2026-09-26 玩家反馈；上一版只改了「追加时保留滚动」，抖动源头其实在这条 clamp）。
+        _pageMin[page] = Mathf.Max(0f, top);
+        _pageMax[page] = Mathf.Max(_pageMin[page], top + height - ViewportHeight);
     }
 
     /// <summary>只切可见性（不碰滚动位置）：翻页、或商店调价页追加新行时用。</summary>
@@ -834,7 +854,13 @@ public sealed class HextechConfigPanel : MonoBehaviour
         }
     }
 
-    private void ApplyPage()
+    /// <summary>
+    /// 切页 / 刷新当前页。<paramref name="resetScroll"/> 为 true 时把滚动顶回页首（翻页用）；
+    /// false 时**保留当前滚动位置**（只夹进本页合法范围）—— 商店调价那种「逐帧长出一行」的场景
+    /// 必须走 false：每长一段就把滚动顶回页首，连续几帧下来就是玩家看到的「页面上下闪」
+    /// （2026-09-23 反馈）。
+    /// </summary>
+    private void ApplyPage(bool resetScroll = true)
     {
         if (_pageCount == 0)
         {
@@ -842,13 +868,15 @@ public sealed class HextechConfigPanel : MonoBehaviour
         }
 
         ApplyVisibility();
-        _scroll = _pageMax[_page];
+
+        // 「顶回页首」= 本页最小滚动（= 页首 top），不是 _pageMax（那是页尾）。
+        _scroll = resetScroll
+            ? _pageMin[_page]
+            : Mathf.Clamp(_scroll, _pageMin[_page], _pageMax[_page]);
+
         _content.anchoredPosition = new Vector2(0f, _scroll);
 
-        if (_pageTitle != null)
-        {
-            _pageTitle.text = $"{PageName(_page)} · 第 {_page + 1}/{_pageCount} 页";
-        }
+        RefreshTabs();
 
         Refresh();
     }
@@ -863,33 +891,104 @@ public sealed class HextechConfigPanel : MonoBehaviour
             }
         }
 
-        return $"第 {page + 1} 页";
+        return Localization.IsEnglish ? $"Page {page + 1}" : $"第 {page + 1} 页";
     }
 
-    private void PagePrev()
+    /// <summary>点顶部标签跳页：先把没提交的输入和重绑收掉，再整页切过去。</summary>
+    private void SwitchPage(int page)
     {
-        if (_page <= 0)
+        if (page < 0 || page >= _pageCount || page == _page)
         {
             return;
         }
 
-        _page--;
+        _page = page;
         CommitEditing();
         _rebinding = null;
         ApplyPage();
     }
 
-    private void PageNext()
+    /// <summary>按页数重建顶部标签条（页数与各页标题都没变就不重建，平时只刷高亮）。</summary>
+    private void RebuildTabs()
     {
-        if (_page >= _pageCount - 1)
+        // 签名 = 页数 + 每页的标题。调价页的表头文本会随状态改写（商店开着没 / 是不是房主），
+        // 每帧拿它当页名的话签名必须一起比 —— 只比页数的话一旦页名抖动就会每帧 Destroy+重建
+        // 整条标签栏，表现成「调价页一直闪」（2026-09-18 反馈）。
+        var signature = _pageCount.ToString();
+
+        for (var i = 0; i < _pageCount; i++)
+        {
+            signature += "|" + PageName(i);
+        }
+
+        if (_tabRects.Count == _pageCount && _tabSignature == signature)
+        {
+            RefreshTabs();
+            return;
+        }
+
+        _tabSignature = signature;
+
+        foreach (var rect in _tabRects)
+        {
+            Destroy(rect.gameObject);
+        }
+
+        _tabRects.Clear();
+        _tabBackgrounds.Clear();
+        _tabLabels.Clear();
+
+        if (_pageCount <= 0 || _tabBar == null)
         {
             return;
         }
 
-        _page++;
-        CommitEditing();
-        _rebinding = null;
-        ApplyPage();
+        // 等分宽度：分类再多也排得下，名字长的分组靠自动缩字号塞进格子里。
+        var width = (_tabBar.rect.width - (TabGap * (_pageCount - 1))) / _pageCount;
+
+        for (var i = 0; i < _pageCount; i++)
+        {
+            var rect = UiFactory.Node($"Tab{i}", _tabBar);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(width, 0f);
+            rect.anchoredPosition = new Vector2(i * (width + TabGap), 0f);
+
+            var background = UiFactory.Rounded(rect, UiFactory.PanelHighlight, 10);
+            UiFactory.Stretch(background.rectTransform);
+
+            var label = UiFactory.Label(rect, PageName(i), 20f, TextAlignmentOptions.Center, UiFactory.TextPrimary);
+            label.enableAutoSizing = true;
+            label.fontSizeMin = 13f;
+            label.fontSizeMax = 20f;
+            UiFactory.Stretch(label.rectTransform, 4f, 0f, 4f, 0f);
+
+            _tabRects.Add(rect);
+            _tabBackgrounds.Add(background);
+            _tabLabels.Add(label);
+        }
+    }
+
+    /// <summary>把当前页的标签点亮（主题色底），其余恢复普通底色。</summary>
+    private void RefreshTabs()
+    {
+        for (var i = 0; i < _tabBackgrounds.Count; i++)
+        {
+            var active = i == _page;
+            var background = active ? UiFactory.Accent : UiFactory.PanelHighlight;
+            var foreground = active ? UiFactory.PanelBackground : UiFactory.TextPrimary;
+
+            if (_tabBackgrounds[i].color != background)
+            {
+                _tabBackgrounds[i].color = background;
+            }
+
+            if (_tabLabels[i].color != foreground)
+            {
+                _tabLabels[i].color = foreground;
+            }
+        }
     }
 
     private void Apply(ConfigEntryBase entry, int direction)
@@ -923,6 +1022,12 @@ public sealed class HextechConfigPanel : MonoBehaviour
         // 配了「只能从这几个里挑」的，左键往下一个候选跳、右键往回跳。
         if (TryCycleList(entry, direction))
         {
+            // 语言一切换，面板里几乎每一行文案都要跟着换：整个重建才刷新得干净。
+            if (entry == ModConfig.Language)
+            {
+                RebuildForLanguage();
+            }
+
             return;
         }
 
@@ -1015,7 +1120,9 @@ public sealed class HextechConfigPanel : MonoBehaviour
             changed++;
         }
 
-        HextechHud.Toast(changed == 0 ? "数值本来就都是默认值" : $"已把 {changed} 项数值恢复默认");
+        HextechHud.Toast(Localization.IsEnglish
+            ? changed == 0 ? "All numeric values are already at their defaults" : $"Reset {changed} numeric values"
+            : changed == 0 ? "数值本来就都是默认值" : $"已把 {changed} 项数值恢复默认");
     }
 
     private void Refresh()
@@ -1072,7 +1179,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
             // 共享代币只能机场开关：不在机场时标注「仅机场」（点击会在 Apply 里被挡下）。
             if (entry == ModConfig.SharedTokens && !HextechScene.InAirport)
             {
-                text += "（仅机场）";
+                text += Localization.IsEnglish ? " (airport only)" : "（仅机场）";
             }
 
             if (row.LastText != text)
@@ -1175,24 +1282,31 @@ public sealed class HextechConfigPanel : MonoBehaviour
         else if (_hover >= 0 && _hover < _rows.Count && _rows[_hover].Entry != null)
         {
             var row = _rows[_hover];
-            var description = row.Entry!.Description?.Description ?? _defaultHint;
+            var key = row.Entry!.Definition.Key;
+            var description = Localization.ConfigDescription(key, row.Entry.Description?.Description ?? _defaultHint);
 
             // 数值行多说一句怎么改：面板上没按钮，值是在框里敲出来的。
             text = row.Field != null
-                ? $"{description} · 点右边输入框直接敲数字，回车保存"
+                ? Localization.IsEnglish ? $"{description} · Click the field, enter a number, and press Enter" : $"{description} · 点右边输入框直接敲数字，回车保存"
                 : description;
         }
         else if (_hover >= 0 && _hover < _rows.Count && _rows[_hover].Offer != null)
         {
-            text = "点 − / ＋ 改这件商品的基础价（按住 Shift 一次 5 枚）· 点中间的数字恢复默认价";
+            text = Localization.IsEnglish
+                ? "Use − / ＋ to edit this item's base price (hold Shift for steps of 5) · click the number in the middle to reset it"
+                : "点 − / ＋ 改这件商品的基础价（按住 Shift 一次 5 枚）· 点中间的数字恢复默认价";
         }
         else if (_hover >= 0 && _hover < _rows.Count && _rows[_hover].IsConfigReset)
         {
-            text = "把上面那些数值项（倍率 / 概率 / 速率 / 上限）恢复成默认值 · 开关与按键不受影响";
+            text = Localization.IsEnglish
+                ? "Restore the numeric values above (rates / chances / caps) to defaults · toggles and keybinds are not affected"
+                : "把上面那些数值项（倍率 / 概率 / 速率 / 上限）恢复成默认值 · 开关与按键不受影响";
         }
         else if (_hover >= 0 && _hover < _rows.Count && _rows[_hover].IsReportRow)
         {
-            text = $"点这一行把编号复制回剪贴板，发给我就能取这份日志 · 服务器只留 {ReportHistory.KeepHours} 小时";
+            text = Localization.IsEnglish
+                ? $"Click this row to copy the code — send it to me and I can fetch the log · the server keeps it {ReportHistory.KeepHours} h"
+                : $"点这一行把编号复制回剪贴板，发给我就能取这份日志 · 服务器只留 {ReportHistory.KeepHours} 小时";
         }
 
         if (_hint.text != text)
@@ -1205,15 +1319,15 @@ public sealed class HextechConfigPanel : MonoBehaviour
     {
         if (row.LastHighlight)
         {
-            return "按键中…";
+            return Localization.T("按键中…");
         }
 
         var value = entry.BoxedValue;
 
         return value switch
         {
-            bool flag => flag ? "开" : "关",
-            KeyCode key => key == KeyCode.None ? "未绑定" : key.ToString(),
+            bool flag => Localization.T(flag ? "开" : "关"),
+            KeyCode key => key == KeyCode.None ? Localization.T("未绑定") : key.ToString(),
             // 三位小数：概率那类默认值是 0.025，只显示两位的话玩家看到的和点出来的对不上。
             float number => number.ToString("0.###", CultureInfo.InvariantCulture),
             double number => number.ToString("0.###", CultureInfo.InvariantCulture),
@@ -1521,7 +1635,9 @@ public sealed class HextechConfigPanel : MonoBehaviour
     /// </summary>
     private void AppendReportRows()
     {
-        AppendHeader($"日志上报 · 本机上传记录（服务器只留 {ReportHistory.KeepHours} 小时）", false);
+        AppendHeader(Localization.IsEnglish
+            ? $"Bug reports · your uploads (the server keeps them {ReportHistory.KeepHours} h)"
+            : $"日志上报 · 本机上传记录（服务器只留 {ReportHistory.KeepHours} 小时）", false);
 
         for (var i = 0; i < ReportRows; i++)
         {
@@ -1609,8 +1725,10 @@ public sealed class HextechConfigPanel : MonoBehaviour
         }
 
         var left = ReportHistory.Remaining(record);
-        var text = $"{record.Code} · {record.Time:MM-dd HH:mm} · {record.Kilobytes} KB · {record.Scene}"
-            + $" · 剩 {(int)Math.Ceiling(left.TotalHours)} 小时";
+        var hours = (int)Math.Ceiling(left.TotalHours);
+        var text = Localization.IsEnglish
+            ? $"{record.Code} · {record.Time:MM-dd HH:mm} · {record.Kilobytes} KB · {record.Scene} · {hours} h left"
+            : $"{record.Code} · {record.Time:MM-dd HH:mm} · {record.Kilobytes} KB · {record.Scene} · 剩 {hours} 小时";
 
         if (row.LastText != text)
         {
@@ -1672,7 +1790,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
 
         var record = records[index];
         ReportHistory.CopyToClipboard(record.Code);
-        HextechHud.Toast($"编号 {record.Code} 已复制 · 尽快发给我（服务器只留 {ReportHistory.KeepHours} 小时）");
+        HextechHud.Toast(Localization.T("编号 {0} 已复制 · 尽快发给我（服务器只留 {1} 小时）", record.Code, ReportHistory.KeepHours));
     }
 
     // ── 商店调价 ────────────────────────────────────────────────
@@ -1717,10 +1835,12 @@ public sealed class HextechConfigPanel : MonoBehaviour
         {
             FlushLayout();
 
-            // 价格页是动态长出来的（物品表扫出来才有一格格），每长出一段就重算分页 + 刷新可见性，
-            // 免得翻到这一页时新长出来的行还顶着「可见」的默认状态、或卡在别的页看不见。
+            // 价格页是动态长出来的（物品表扫出来才有一格格），每长出一段就重算分页。
+            // 这里**不能**把滚动顶回页首：物资那几百行是逐帧补的，顶一次弹一次，
+            // 玩家看到的是整页上下闪。保留滚动位置、只夹进本页范围即可
+            // （2026-09-20 修的是「叠在一起」，那是行位置没算对，不是滚动的问题）。
             RecomputePages();
-            ApplyVisibility();
+            ApplyPage(resetScroll: false);
         }
     }
 
@@ -1881,7 +2001,9 @@ public sealed class HextechConfigPanel : MonoBehaviour
         // 默认价写死在左边：它不随玩家改价变，所以一次性写上就行。
         var label = UiFactory.Label(
             rect,
-            $"{offer.Title} · 默认 {offer.BaseCost}",
+            Localization.IsEnglish
+                ? $"{offer.DisplayTitle} · Default {offer.BaseCost}"
+                : $"{offer.DisplayTitle} · 默认 {offer.BaseCost}",
             19f,
             TextAlignmentOptions.Left,
             UiFactory.TextPrimary);
@@ -2009,7 +2131,7 @@ public sealed class HextechConfigPanel : MonoBehaviour
         else if (Inside(row.ValueRect, mouse))
         {
             ShopPricing.Reset(offer.Id, LocalState());
-            HextechHud.Toast($"{offer.Title}：已恢复默认价");
+            HextechHud.Toast($"{offer.DisplayTitle}{Localization.T("：已恢复默认价")}");
         }
     }
 
@@ -2061,8 +2183,8 @@ public sealed class HextechConfigPanel : MonoBehaviour
     private static void RefreshPriceHeader(Row row)
     {
         var text = !ModConfig.ShopEnabled.Value
-            ? "商店调价 · 商店已关闭"
-            : (ShopPricing.CanEdit ? "商店调价" : "商店调价 · 联机时只有房主能改");
+            ? Localization.T("商店调价 · 商店已关闭")
+            : Localization.T(ShopPricing.CanEdit ? "商店调价" : "商店调价 · 联机时只有房主能改");
 
         if (row.LastText == text)
         {
@@ -2091,13 +2213,64 @@ public sealed class HextechConfigPanel : MonoBehaviour
     /// <summary>行建完（或者又追加上一段）之后，把内容高度和滚动上限重算一遍。</summary>
     private void FlushLayout()
     {
+        RelayoutRows();
+
         // 最后一行的 RowGap 不算进高度里，不然列表底部会多出一小段空白。
         var height = Mathf.Max(0f, -_cursor - RowGap);
 
         _content.sizeDelta = new Vector2(0f, height);
 
-        // 滚动范围按「当页」算（见 HandleScroll），这里只把内容高度落好、滚动归零。
-        _scroll = 0f;
+        // 滚动范围按「当页」算（见 HandleScroll），这里只把内容高度落好。
+        // **不在这里把滚动归零**：调用方紧接着就会 ApplyPage（按当页范围夹好滚动），
+        // 归零会把玩家正在看的那一段拽回列表开头 —— 调价页逐帧补行时会一路弹（2026-09-26）。
         _content.anchoredPosition = new Vector2(0f, _scroll);
+    }
+
+    /// <summary>
+    /// 把所有行按「全宽 / 双列」从头重排一遍纵向位置。
+    /// <para>
+    /// 行的 Y 坐标原本只在创建那一刻写死，靠 <see cref="_cursor"/> 全程不出错 ——
+    /// 2026-09-20 有玩家反馈 F9 的调价页整页叠在一起，与其追查是哪条路径弄脏了游标，
+    /// 不如每次追加后按行的实际高度确定性重排：不管中间发生了什么，位置永远正确。
+    /// （全宽行 anchorMax.x=1 独占一行；普通配置行与调价行是双列格子，排满换行。）
+    /// </para>
+    /// </summary>
+    private void RelayoutRows()
+    {
+        var cursor = 0f;
+        var cellsInRow = 0;
+
+        foreach (var row in _rows)
+        {
+            var rect = row.Rect;
+
+            if (rect == null)
+            {
+                continue;
+            }
+
+            var height = rect.sizeDelta.y;
+
+            if (rect.anchorMax.x > 0.5f)
+            {
+                cellsInRow = 0;
+                cursor -= height + RowGap;
+                rect.offsetMin = new Vector2(0f, cursor);
+                rect.offsetMax = new Vector2(0f, cursor + height);
+            }
+            else
+            {
+                if (cellsInRow == 0)
+                {
+                    cursor -= height + RowGap;
+                }
+
+                var column = cellsInRow;
+                cellsInRow = (cellsInRow + 1) % Columns;
+                rect.anchoredPosition = new Vector2(column * (CellWidth + ColumnGap), cursor + height);
+            }
+        }
+
+        _cursor = cursor;
     }
 }

@@ -15,6 +15,26 @@ namespace PeakModder.HextechMod;
 /// </summary>
 internal static class ModConfig
 {
+    /// <summary>
+    /// 概率类配置统一按 **0~1 的小数** 使用；**大于 1 的一律当「百分之几」看待**（2.5 → 2.5%）。
+    /// <para>
+    /// 由来：面板里手敲的人习惯按百分数敲（想表达 2.5% 就敲 2.5），而各处的读法一律
+    /// <c>Clamp01</c> —— 2.5 会被夹成 1.0，也就是 100%。表现就是「开箱百分百出海克斯」
+    /// （2026-09-23 玩家反馈，新手第一次调设置最容易踩到）。现在大于 1 的值按百分数折算，
+    /// 两种写法都能对上，并在日志里留一句说明。
+    /// </para>
+    /// </summary>
+    public static float NormalizeChance(float value)
+    {
+        if (float.IsNaN(value))
+        {
+            return 0f;
+        }
+
+        return value > 1f ? Mathf.Clamp01(value / 100f) : Mathf.Clamp01(value);
+    }
+
+    public static ConfigEntry<string> Language = null!;
     public static ConfigEntry<bool> Enabled = null!;
     public static ConfigEntry<KeyCode> SkillKey = null!;
     public static ConfigEntry<KeyCode> CycleSkillKey = null!;
@@ -38,9 +58,11 @@ internal static class ModConfig
     public static ConfigEntry<KeyCode> ConfigPanelKey = null!;
     public static ConfigEntry<KeyCode> ReportKey = null!;
     public static ConfigEntry<bool> SharedTokens = null!;
-    public static ConfigEntry<bool> CheckUpdateOnStart = null!;
     public static ConfigEntry<string> UpdateFeedUrl = null!;
     public static ConfigEntry<string> IgnoredUpdateVersion = null!;
+
+    /// <summary>调试用：临时测试「直接召唤游戏直升机」的按键。验证完会整个移除，别当正式功能用。</summary>
+    public static ConfigEntry<KeyCode> HelicopterTestKey = null!;
 
     /// <summary>
     /// 「这份 .cfg 是按哪个模组版本写的」。更新后第一次启动靠它判断要不要把配置刷成本版默认值。
@@ -66,6 +88,14 @@ internal static class ModConfig
     public static void Bind(ConfigFile config)
     {
         File = config;
+
+        Language = config.Bind(
+            "设置",
+            "语言",
+            Localization.Chinese,
+            new ConfigDescription(
+                "选择模组界面使用的语言。",
+                new AcceptableValueList<string>(Localization.Chinese, Localization.English)));
 
         Enabled = config.Bind(
             "常规",
@@ -171,9 +201,9 @@ internal static class ModConfig
             1f,
             new ConfigDescription(
                 "功能性定价的强度：只改「作用」和「按稀有度算出来的价」明显对不上的那批 —— "
-                + "位移类（绳索 / 踏板菇 / 飞行 / 可放置）补到 30 枚，护符与救援钩 30 枚，"
-                + "背包与续航 25 枚，光源与破坏 20 枚；反方向的顶价：滑翔翼 22 枚、一束气球 15 枚、"
-                + "纯补给（蘑菇 / 浆果 / 袋装食品）×0.8 且不超过 12 枚。"
+                + "位移类（绳索 / 踏板菇 / 飞行 / 可放置）补到 120 枚，护符与救援钩 120 枚，"
+                + "背包与续航 100 枚，光源与破坏 80 枚；反方向的顶价：滑翔翼 88 枚、一束气球 120 枚、"
+                + "纯补给（蘑菇 / 浆果 / 袋装食品）按稀有度打折且不超过 48 枚。"
                 + "底线只补差价、顶价只压高价，两边都不动本来就在区间里的道具。"
                 + "1 = 默认（补到 / 压到上面这些价），0 = 完全不管、只按稀有度定价，2 = 把这份差距再翻一倍。",
                 new AcceptableValueRange<float>(0f, 2f)));
@@ -182,7 +212,8 @@ internal static class ModConfig
             "行李箱",
             "正面海克斯概率",
             0.025f,
-            "打开行李箱时，每个抽奖位抽出「正面」海克斯的概率。0.025 = 2.5%。"
+            "打开行李箱时，每个抽奖位抽出「正面」海克斯的概率。0.025 = 2.5%；"
+            + "直接写 2.5 也一样（大于 1 的数一律按百分数看待）。"
             + "只给永久收益，抽到什么就是什么、不给你选。");
 
         LuggageNegativeChance = config.Bind(
@@ -239,14 +270,6 @@ internal static class ModConfig
             + "所以 1 = 极稀有（每格约 0.1%），调大更容易抽到，0 = 完全抽不到。"
             + "商店的抽奖券开到黄金为止，改这个只会影响自然三选一与开行李箱。");
 
-        CheckUpdateOnStart = config.Bind(
-            "更新",
-            "启动时检查更新",
-            true,
-            "每次打开游戏、刚进主菜单（还没选在线 / 单人）时检查一次新版本。"
-            + "有新版本会弹提示，指路到安装器（HextechModInstaller.exe）更新，也可以选「忽略此版本」。"
-            + "检查失败（断网、服务器维护）会静默跳过，不影响正常玩。");
-
         // 默认留空，不把内置地址写进玩家的 .cfg —— 那等于把服务器地址抄一份到磁盘上，
         // 玩家求助贴配置时容易跟着出去。留空时用构建时注入的内置地址（见 UpdateFeed）。
         UpdateFeedUrl = config.Bind(
@@ -265,6 +288,17 @@ internal static class ModConfig
         // 发出去的版本不该留这种能绕过正常流程的开关。老 .cfg 里那两条留着也没用，顺手清掉。
         RemoveLegacy(config, "调试", "强制三选一按键");
         RemoveLegacy(config, "Debug", "DebugChoiceKey");
+
+        // 调试：启用游戏预埋的直升机并搬到身边（改挂父物体实现指定位置）。
+        // ⚠ 2026-09-20 用户定调：功能「待定、暂不开放」—— 旧版默认绑了 P，这里把旧条目清掉、
+        // 新条目默认 None（老玩家的 .cfg 里残留的旧键值会随 RemoveLegacy 一起清掉，不会再被触发）。
+        RemoveLegacy(config, "调试", "召唤直升机");
+
+        HelicopterTestKey = config.Bind(
+            "调试",
+            "召唤直升机（待定）",
+            KeyCode.None,
+            "调试用：按一下启用游戏预埋的直升机并搬到身边（本机可见，联机队友看不到）。默认不绑定按键，功能待定；想试验手动把这项改成按键即可。");
 
         // 记账用：上次运行的是哪个版本。这一项必须在「覆盖」之前绑好。
         ConfigVersion = config.Bind(
@@ -312,7 +346,8 @@ internal static class ModConfig
     /// </summary>
     private static bool IsPreservedAcrossUpdates(ConfigEntryBase entry)
     {
-        return entry == Enabled
+        return entry == Language
+            || entry == Enabled
             || entry == SkillKey
             || entry == CycleSkillKey
             || entry == ResurrectKey
@@ -326,7 +361,6 @@ internal static class ModConfig
             || entry == ShopEnabled
             || entry == CampfireAfkGuard
             || entry == CarryGuard
-            || entry == CheckUpdateOnStart
             || entry == UpdateFeedUrl
             || entry == IgnoredUpdateVersion;
     }
@@ -405,8 +439,12 @@ internal static class ModConfig
         Adopt(config, LuggageTokenChance, "Luggage", "LuggageTokenChance");
         Adopt(config, LuggageTokenMax, "Luggage", "LuggageTokenMax");
         Adopt(config, LegendaryWeight, "Hextech", "LegendaryWeight");
-        Adopt(config, CheckUpdateOnStart, "Update", "CheckUpdateOnStart");
         Adopt(config, UpdateFeedUrl, "Update", "UpdateFeedUrl");
+
+        // 「启动时检查更新」已经整个删掉（检测改到进机场时做，不再有开关）：
+        // 老 .cfg 里的中英文旧键都清掉，不留废键。
+        RemoveLegacy(config, "Update", "CheckUpdateOnStart");
+        RemoveLegacy(config, "更新", "启动时检查更新");
         Adopt(config, IgnoredUpdateVersion, "Update", "IgnoredUpdateVersion");
 
         // 旧版本把内置更新源当成默认值绑定，BepInEx 会把它抄进 .cfg，有些玩家还手动填过一遍。

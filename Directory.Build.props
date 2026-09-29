@@ -30,13 +30,6 @@
     <AssemblyMetadata Include="HextechUpdateFeedUrl" Value="$(HextechUpdateFeedUrl)" />
   </ItemGroup>
 
-  <!-- Shared Thunderstore metadata -->
-  <PropertyGroup>
-    <ThunderstoreTeam>PeakModder</ThunderstoreTeam>
-    <!-- TODO: Add a link to your mod repository here (optional) -->
-    <RepositoryUrl></RepositoryUrl>
-  </PropertyGroup>
-
   <!-- Shared primary configuration for the project -->
   <PropertyGroup>
     <!-- Use latest C# version. -->

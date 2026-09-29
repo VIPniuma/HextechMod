@@ -32,6 +32,19 @@ internal static class ShopPricing
 
     private static readonly Dictionary<string, int> Overrides = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 是否已经从房主手里拿到过整张调价表（空表也算 —— 那表示房主没有改过任何价）。
+    /// <para>
+    /// 联机房里价格是全房间统一、以房主为准的：没拿到这张表之前，客户端**不认自己本地存的改价**
+    /// （见 <see cref="OverrideFor"/> 的闸），否则中途加入的玩家会看到自己上次单机改的价格
+    /// （2026-09-22 用户反馈）。拿到的渠道是 <see cref="ApplyRemote"/>（房主广播 / 补发）。
+    /// </para>
+    /// </summary>
+    public static bool SyncedFromHost { get; private set; }
+
+    /// <summary>离开房间 / 换了房间时清同步标记：下一间房要向（新）房主重新要一次表。</summary>
+    public static void MarkUnsynced() => SyncedFromHost = false;
+
     private static bool _loaded;
 
     /// <summary>
@@ -74,6 +87,14 @@ internal static class ShopPricing
         }
 
         EnsureLoaded();
+
+        // 联机房里价格以房主为准：还没拿到房主那张表之前，宁可按默认价显示，
+        // 也绝不能把「自己本地存的改价」当成房间价 —— 否则中途加入的玩家会看到
+        // 自己上次单机 / 上个房间改的价格（2026-09-22 用户反馈）。
+        if (!SyncedFromHost && PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient)
+        {
+            return null;
+        }
 
         return Overrides.TryGetValue(id, out var price) ? price : null;
     }
@@ -205,6 +226,9 @@ internal static class ShopPricing
         }
 
         _loaded = true;
+
+        // 房主的整张表到手（哪怕一条改价都没有）：同步完成，重试循环可以停了。
+        SyncedFromHost = true;
     }
 
     private static void EnsureLoaded()
